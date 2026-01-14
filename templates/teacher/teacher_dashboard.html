@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>דשבורד מורה - Crypto-Class</title>
+    <style>
+        body { font-family: Arial; padding: 20px; background: #f5f5f5; }
+        .header { background: #4c51bf; color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+        .stat-card { background: white; padding: 20px; border-radius: 10px; text-align: center; }
+        .stat-number { font-size: 2em; font-weight: bold; color: #4c51bf; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>👨‍🏫 דשבורד מורה - Crypto-Class</h1>
+            <a href="/teacher/logout" style="color: white;">🚪 יציאה</a>
+            <a href="/" style="color: white; margin-right: 20px;">🏠 דף הבית</a>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <h3>משתמשים רשומים</h3>
+                <div class="stat-number">{{ total_users }}</div>
+            </div>
+            <div class="stat-card">
+                <h3>פעילים היום</h3>
+                <div class="stat-number">{{ active_today }}</div>
+            </div>
+            <div class="stat-card">
+                <h3>טוקנים כוללים</h3>
+                <div class="stat-number">{{ total_tokens }}</div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 30px;">
+            <h2>🏆 משתמשים מובילים</h2>
+            {% if top_users %}
+                <ul>
+                {% for user in top_users %}
+                    <li>{{ user.first_name or user.username }} - {{ user.tokens }} טוקנים (רמה {{ user.level }})</li>
+                {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

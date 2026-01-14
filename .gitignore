@@ -1,0 +1,42 @@
+# סביבות וירטואליות
+venv/
+env/
+ENV/
+
+# קבצי סביבה
+.env
+.env.local
+.env.production
+
+# מסדי נתונים
+*.db
+*.sqlite
+*.sqlite3
+data/attendance.db
+
+# קבצי Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# מערכות הפעלה
+.DS_Store
+Thumbs.db
+
+# קבצי לוג
+*.log
+logs/
+
+# קבצים זמניים
+tmp/
+temp/
+
+# קבצי IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# קבצי הרצה מקומיים
+run_bot.py
+test_basic.py

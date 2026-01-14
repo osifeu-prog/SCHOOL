@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Crypto-Class{% endblock %}</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+        }
+        .button {
+            display: inline-block;
+            background: #4c51bf;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            margin: 5px;
+            transition: transform 0.3s;
+        }
+        .button:hover {
+            transform: translateY(-2px);
+            background: #434190;
+        }
+        .content {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            margin-bottom: 20px;
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .status-value {
+            font-weight: bold;
+        }
+        .healthy { color: #68d391; }
+        .unhealthy { color: #fc8181; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎓 Crypto-Class</h1>
+            <p>מערכת נוכחות מבוססת בלוקצ'יין</p>
+            <div>
+                <a href="/" class="button">🏠 דף הבית</a>
+                <a href="/stats" class="button">📊 סטטיסטיקות</a>
+                <a href="/teacher/login" class="button">👨‍🏫 כניסת מורה</a>
+                <a href="/health" class="button">🩺 בריאות מערכת</a>
+            </div>
+        </div>
+        
+        <div class="content">
+            {% block content %}{% endblock %}
+        </div>
+        
+        <div style="text-align: center; margin-top: 40px; opacity: 0.7;">
+            <p>Crypto-Class © 2026 | גרסה 2.1.0</p>
+        </div>
+    </div>
+</body>
+</html>

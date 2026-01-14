@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>כניסת מורה - Crypto-Class</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .login-container {
+            width: 100%;
+            max-width: 400px;
+            padding: 20px;
+        }
+        
+        .login-box {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+            text-align: center;
+        }
+        
+        .logo {
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            color: #4c51bf;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.8rem;
+        }
+        
+        .subtitle {
+            color: #718096;
+            margin-bottom: 30px;
+            font-size: 0.9rem;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+            text-align: right;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #4a5568;
+            font-weight: 500;
+        }
+        
+        input[type="password"] {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #4c51bf;
+        }
+        
+        button {
+            background: #4c51bf;
+            color: white;
+            border: none;
+            padding: 14px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            width: 100%;
+            transition: background 0.3s, transform 0.2s;
+        }
+        
+        button:hover {
+            background: #434190;
+            transform: translateY(-2px);
+        }
+        
+        .error {
+            color: #e53e3e;
+            margin-top: 15px;
+            padding: 10px;
+            background: #fed7d7;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #4c51bf;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .info-box {
+            margin-top: 25px;
+            padding: 15px;
+            background: #f7fafc;
+            border-radius: 8px;
+            border-left: 4px solid #4c51bf;
+            text-align: right;
+            font-size: 0.85rem;
+            color: #4a5568;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <div class="logo">👨‍🏫</div>
+            <h1>כניסת מורה</h1>
+            <p class="subtitle">Crypto-Class - מערכת ניהול כיתה</p>
+            
+            <form method="POST">
+                <div class="form-group">
+                    <label for="password">סיסמת מורה</label>
+                    <input type="password" id="password" name="password" placeholder="הזן סיסמה" required>
+                </div>
+                
+                <button type="submit">התחברות</button>
+            </form>
+            
+            {% if error %}
+            <div class="error">
+                {{ error }}
+            </div>
+            {% endif %}
+            
+            <div class="info-box">
+                <strong>הערה:</strong> הסיסמה ניתנת על ידי מנהל המערכת.
+                אם שכחת את הסיסמה, פנה למנהל המערכת.
+            </div>
+            
+            <a href="/" class="back-link">← חזרה לדף הבית</a>
+        </div>
+    </div>
+</body>
+</html>
