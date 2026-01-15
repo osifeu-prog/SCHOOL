@@ -1,10 +1,11 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS"
+    "builder": "NIXPACKS",
+    "buildCommand": "pip install -r requirements.txt && python init_db.py"
   },
   "deploy": {
-    "startCommand": "gunicorn --worker-tmp-dir /dev/shm --workers 1 --threads 8 --timeout 120 bot.main:flask_app --bind 0.0.0.0:$PORT --preload",
+    "startCommand": "gunicorn bot.main:flask_app --workers=2 --threads=4 --timeout=120 --bind=0.0.0.0:$PORT",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 60,
     "restartPolicyType": "ON_FAILURE"
