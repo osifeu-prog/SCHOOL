@@ -1,21 +1,33 @@
-# database/queries.py
+#!/usr/bin/env python3
+"""
+מסד נתונים משודרג עם תכונות חדשות
+"""
+
 from .models import Session, User, Attendance, Task, TaskCompletion, UserDailyStats, Referral
 from .models import TaskStatus, TaskFrequency, TaskType
 from datetime import datetime, date, timedelta
 import random
 import string
+from sqlalchemy import func, desc, and_, or_
 
-# ===================== פונקציות עזר =====================
+# ========== פונקציות עזר ==========
 
 def generate_referral_code(length=8):
-    """יצירת קוד הפניה ייחודי"""
+    """יצירת קוד הפניה ייחודי עם בדיקת כפילויות"""
     chars = string.ascii_uppercase + string.digits
-    return ''.join(random.choice(chars) for _ in range(length))
+    while True:
+        code = ''.join(random.choice(chars) for _ in range(length))
+        # בדוק אם הקוד כבר קיים
+        session = Session()
+        existing = session.query(User).filter_by(referral_code=code).first()
+        session.close()
+        if not existing:
+            return code
 
-# ===================== פונקציות אתחול =====================
+# ========== פונקציות אתחול ==========
 
 def init_database():
-    """אתחול מסד הנתונים והוספת משימות ברירת מחדל"""
+    """אתחול מסד הנתונים עם נתונים ראשוניים"""
     from .models import Base, engine
     
     try:
@@ -24,14 +36,16 @@ def init_database():
         
         session = Session()
         try:
+            # משימות ברירת מחדל
             default_tasks = [
                 {
-                    "name": "צ'ק-ין יומי",
+                    "name": "צ'ק-אין יומי",
                     "description": "התחבר כל יום וקבל טוקן",
                     "task_type": TaskType.CLASS,
                     "frequency": TaskFrequency.DAILY,
                     "tokens_reward": 1,
-                    "exp_reward": 10
+                    "exp_reward": 10,
+                    "is_active": True
                 },
                 {
                     "name": "תרומה לפורום",
@@ -40,7 +54,8 @@ def init_database():
                     "frequency": TaskFrequency.DAILY,
                     "tokens_reward": 3,
                     "exp_reward": 25,
-                    "requires_proof": True
+                    "requires_proof": True,
+                    "is_active": True
                 },
                 {
                     "name": "סיוע לתלמיד",
@@ -49,7 +64,8 @@ def init_database():
                     "frequency": TaskFrequency.DAILY,
                     "tokens_reward": 5,
                     "exp_reward": 50,
-                    "requires_proof": True
+                    "requires_proof": True,
+                    "is_active": True
                 },
                 {
                     "name": "הפניה של חבר",
@@ -57,7 +73,27 @@ def init_database():
                     "task_type": TaskType.REFERRAL,
                     "frequency": TaskFrequency.ONE_TIME,
                     "tokens_reward": 10,
-                    "exp_reward": 100
+                    "exp_reward": 100,
+                    "is_active": True
+                },
+                {
+                    "name": "השתתפות בשיעור",
+                    "description": "השתתף בשיעור הקבוצתי",
+                    "task_type": TaskType.CLASS,
+                    "frequency": TaskFrequency.WEEKLY,
+                    "tokens_reward": 15,
+                    "exp_reward": 75,
+                    "is_active": True
+                },
+                {
+                    "name": "משימת אתגר שבועי",
+                    "description": "השלם את האתגר השבועי",
+                    "task_type": TaskType.QUIZ,
+                    "frequency": TaskFrequency.WEEKLY,
+                    "tokens_reward": 25,
+                    "exp_reward": 150,
+                    "requires_proof": True,
+                    "is_active": True
                 }
             ]
             
@@ -71,51 +107,83 @@ def init_database():
             session.commit()
             print("✅ מסד הנתונים אותחל בהצלחה עם משימות ברירת מחדל")
             
+            # הוספת משתמש דמו אם אין משתמשים
+            user_count = session.query(User).count()
+            if user_count == 0:
+                demo_user = User(
+                    telegram_id=123456789,
+                    username="demo_user",
+                    first_name="משתמש",
+                    last_name="דמו",
+                    tokens=100,
+                    referral_code=generate_referral_code()
+                )
+                session.add(demo_user)
+                session.commit()
+                print("✅ משתמש דמו נוסף")
+                
         except Exception as e:
             session.rollback()
             print(f"❌ שגיאה באתחול משימות: {e}")
+            raise
         finally:
             session.close()
             
     except Exception as e:
         print(f"❌ שגיאה ביצירת טבלאות: {e}")
+        raise
 
-# ===================== פונקציות משתמשים =====================
+# ========== פונקציות משתמשים ==========
 
 def register_user(telegram_id, username=None, first_name=None, last_name=None, referral_code=None):
-    """רישום משתמש חדש עם הפניה"""
+    """רישום משתמש חדש עם הפניה ולוגיקה משופרת"""
     session = Session()
     try:
         existing_user = session.query(User).filter_by(telegram_id=telegram_id).first()
         
         if not existing_user:
+            # יצירת קוד הפניה ייחודי
             user_referral_code = generate_referral_code()
-            while session.query(User).filter_by(referral_code=user_referral_code).first():
-                user_referral_code = generate_referral_code()
             
             user = User(
                 telegram_id=telegram_id,
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
-                tokens=0,
-                referral_code=user_referral_code
+                tokens=10,  # בונוס הרשמה
+                referral_code=user_referral_code,
+                level=1,
+                experience=0,
+                next_level_exp=100
             )
             session.add(user)
             
+            # טיפול בהפניה אם קיים
             if referral_code:
                 referrer = session.query(User).filter_by(referral_code=referral_code).first()
                 if referrer and referrer.telegram_id != telegram_id:
-                    referral = Referral(
+                    # בדוק אם כבר קיימת הפניה
+                    existing_ref = session.query(Referral).filter_by(
                         referrer_id=referrer.telegram_id,
-                        referred_id=telegram_id,
-                        referral_code=referral_code
-                    )
-                    session.add(referral)
+                        referred_id=telegram_id
+                    ).first()
                     
-                    referrer.total_referrals += 1
-                    referrer.tokens += 10
-                    referrer.referral_tokens += 10
+                    if not existing_ref:
+                        referral = Referral(
+                            referrer_id=referrer.telegram_id,
+                            referred_id=telegram_id,
+                            referral_code=referral_code,
+                            status='active'
+                        )
+                        session.add(referral)
+                        
+                        # עדכון המזמין
+                        referrer.total_referrals += 1
+                        referrer.tokens += 10
+                        referrer.referral_tokens += 10
+                        
+                        # הודעה למזמין
+                        user.tokens += 5  # בונוס למצטרף דרך הפניה
             
             session.commit()
             print(f"✅ משתמש נרשם: {telegram_id} עם קוד הפניה: {user_referral_code}")
@@ -129,39 +197,150 @@ def register_user(telegram_id, username=None, first_name=None, last_name=None, r
         session.close()
 
 def checkin_user(telegram_id):
-    """רישום נוכחות יומית"""
+    """צ'ק-אין יומי עם לוגיקה מתקדמת"""
     session = Session()
     try:
         today = date.today()
         
+        # בדוק אם כבר ביצע צ'ק-אין היום
         existing_checkin = session.query(Attendance).filter_by(
             telegram_id=telegram_id,
             date=today
         ).first()
         
         if existing_checkin:
-            return False, "כבר ביצעת צ'ק-ין היום!"
+            return False, "כבר ביצעת צ'ק-אין היום!"
         
+        # קבל את המשתמש
+        user = session.query(User).filter_by(telegram_id=telegram_id).first()
+        if not user:
+            return False, "משתמש לא נמצא. שלח /start כדי להירשם"
+        
+        # חישוב טוקנים לפי רצף
+        yesterday = today - timedelta(days=1)
+        yesterday_checkin = session.query(Attendance).filter_by(
+            telegram_id=telegram_id,
+            date=yesterday
+        ).first()
+        
+        # חשב את הרצף הנוכחי
+        recent_attendances = session.query(Attendance).filter(
+            Attendance.telegram_id == telegram_id,
+            Attendance.date >= today - timedelta(days=30)
+        ).order_by(Attendance.date.desc()).all()
+        
+        streak = 1
+        last_date = today
+        for attendance in recent_attendances:
+            if attendance.date == last_date - timedelta(days=1):
+                streak += 1
+                last_date = attendance.date
+            else:
+                break
+        
+        # חישוב בונוסים
+        base_tokens = 1
+        streak_bonus = 0
+        
+        if streak >= 7:
+            streak_bonus = 3
+        elif streak >= 3:
+            streak_bonus = 1
+        
+        # בונוס רמה
+        level_bonus = user.level // 3  # כל 3 רמות בונוס נוסף
+        
+        total_tokens = base_tokens + streak_bonus + level_bonus
+        
+        # יצירת רשומת נוכחות
         attendance = Attendance(
             telegram_id=telegram_id,
             date=today,
-            tokens_earned=1
+            tokens_earned=total_tokens
         )
         session.add(attendance)
         
-        user = session.query(User).filter_by(telegram_id=telegram_id).first()
-        if user:
-            user.tokens += 1
-            user.last_checkin = today
-            user.experience += 10
+        # עדכון המשתמש
+        user.tokens += total_tokens
+        user.last_checkin = today
+        user.experience += (total_tokens * 10)
+        
+        # עדכון רמה אם צריך
+        update_user_level(user)
+        
+        # עדכון סטטיסטיקות יומיות
+        update_daily_stats(telegram_id, today, total_tokens)
         
         session.commit()
-        return True, "🎉 צ'ק-ין נרשם בהצלחה! קיבלת 1 טוקן!"
+        
+        # יצירת הודעה עם פירוט
+        message = f"🎉 צ'ק-אין נרשם בהצלחה!\n\n"
+        message += f"💰 קיבלת: {total_tokens} טוקנים\n"
+        if streak_bonus > 0:
+            message += f"   • בסיס: 1\n"
+            message += f"   • רצף ({streak} ימים): +{streak_bonus}\n"
+        if level_bonus > 0:
+            message += f"   • רמה ({user.level}): +{level_bonus}\n"
+        message += f"\n🔥 הרצף שלך: {streak} ימים\n"
+        message += f"🏆 הרמה שלך: {user.level}\n"
+        message += f"📊 ניסיון: {user.experience}/{user.next_level_exp}"
+        
+        return True, message
         
     except Exception as e:
         session.rollback()
-        print(f"❌ שגיאה ברישום צ'ק-ין: {e}")
+        print(f"❌ שגיאה ברישום צ'ק-אין: {e}")
         return False, f"שגיאה: {str(e)}"
+    finally:
+        session.close()
+
+def update_user_level(user):
+    """עדכון רמת המשתמש לפי הניסיון"""
+    # נוסחת רמות מורכבת יותר
+    level_thresholds = [0, 100, 300, 600, 1000, 1500, 2100, 2800, 
+                       3600, 4500, 5500, 6600, 7800, 9100, 10500]
+    
+    new_level = 1
+    for i, threshold in enumerate(level_thresholds[1:], 1):
+        if user.experience >= threshold:
+            new_level = i + 1
+        else:
+            break
+    
+    if new_level > user.level:
+        user.level = new_level
+        user.next_level_exp = level_thresholds[new_level] if new_level < len(level_thresholds) else level_thresholds[-1] * 1.5
+        # בונוס עלייה ברמה
+        user.tokens += new_level * 5
+        return True, new_level
+    
+    return False, user.level
+
+def update_daily_stats(telegram_id, date, tokens_earned):
+    """עדכון סטטיסטיקות יומיות"""
+    session = Session()
+    try:
+        stats = session.query(UserDailyStats).filter_by(
+            telegram_id=telegram_id,
+            date=date
+        ).first()
+        
+        if not stats:
+            stats = UserDailyStats(
+                telegram_id=telegram_id,
+                date=date,
+                tasks_completed=0,
+                tokens_earned=tokens_earned,
+                streak_days=1  # יחושב מחדש אחר כך
+            )
+            session.add(stats)
+        else:
+            stats.tokens_earned += tokens_earned
+        
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        print(f"❌ שגיאה בעדכון סטטיסטיקות יומיות: {e}")
     finally:
         session.close()
 
@@ -189,11 +368,14 @@ def get_user(telegram_id):
     finally:
         session.close()
 
-def get_all_users():
-    """קבלת כל המשתמשים"""
+def get_all_users(limit=None, offset=0):
+    """קבלת כל המשתמשים עם אפשרויות גלישה"""
     session = Session()
     try:
-        users = session.query(User).order_by(User.created_at.desc()).all()
+        query = session.query(User).order_by(User.created_at.desc())
+        if limit:
+            query = query.limit(limit).offset(offset)
+        users = query.all()
         return users
     except Exception as e:
         print(f"❌ שגיאה בקבלת כל המשתמשים: {e}")
@@ -209,10 +391,18 @@ def get_user_level_info(telegram_id):
         if not user:
             return None
         
-        from sqlalchemy import func
+        # חישוב דירוג
         rank = session.query(User).filter(User.tokens > user.tokens).count() + 1
         
+        # חישוב אחוזי התקדמות
         progress_percentage = int((user.experience / user.next_level_exp) * 100) if user.next_level_exp > 0 else 0
+        
+        # סטטיסטיקות נוספות
+        total_tasks = session.query(TaskCompletion).filter_by(telegram_id=telegram_id).count()
+        completed_tasks = session.query(TaskCompletion).filter_by(
+            telegram_id=telegram_id,
+            status=TaskStatus.COMPLETED
+        ).count()
         
         return {
             'level': user.level,
@@ -220,7 +410,10 @@ def get_user_level_info(telegram_id):
             'next_level_exp': user.next_level_exp,
             'total_experience': user.total_experience,
             'progress_percentage': progress_percentage,
-            'rank': rank
+            'rank': rank,
+            'total_tasks': total_tasks,
+            'completed_tasks': completed_tasks,
+            'completion_rate': int((completed_tasks / total_tasks * 100)) if total_tasks > 0 else 0
         }
         
     except Exception as e:
@@ -230,7 +423,7 @@ def get_user_level_info(telegram_id):
         session.close()
 
 def get_top_users(limit=10, order_by='tokens'):
-    """קבלת רשימת המשתמשים המובילים"""
+    """קבלת רשימת המשתמשים המובילים עם אפשרויות מיון"""
     session = Session()
     try:
         if order_by == 'tokens':
@@ -239,6 +432,15 @@ def get_top_users(limit=10, order_by='tokens'):
             users = session.query(User).order_by(User.level.desc(), User.experience.desc()).limit(limit).all()
         elif order_by == 'referrals':
             users = session.query(User).order_by(User.total_referrals.desc()).limit(limit).all()
+        elif order_by == 'streak':
+            # חישוב רצף מורכב יותר
+            users = session.query(User).all()
+            users_with_streak = []
+            for user in users:
+                streak = calculate_user_streak(user.telegram_id)
+                users_with_streak.append((user, streak))
+            users_with_streak.sort(key=lambda x: x[1], reverse=True)
+            users = [u[0] for u in users_with_streak[:limit]]
         else:
             users = session.query(User).order_by(User.tokens.desc()).limit(limit).all()
         
@@ -249,11 +451,41 @@ def get_top_users(limit=10, order_by='tokens'):
     finally:
         session.close()
 
+def calculate_user_streak(telegram_id):
+    """חישוב רצף צ'ק-אין של משתמש"""
+    session = Session()
+    try:
+        attendances = session.query(Attendance).filter_by(
+            telegram_id=telegram_id
+        ).order_by(Attendance.date.desc()).all()
+        
+        if not attendances:
+            return 0
+        
+        streak = 0
+        current_date = date.today()
+        
+        for attendance in attendances:
+            if attendance.date == current_date:
+                streak += 1
+                current_date -= timedelta(days=1)
+            else:
+                break
+        
+        return streak
+    except Exception as e:
+        print(f"❌ שגיאה בחישוב רצף: {e}")
+        return 0
+    finally:
+        session.close()
+
 def get_user_referrals(telegram_id, limit=10):
     """קבלת רשימת ההפניות של משתמש"""
     session = Session()
     try:
-        referrals = session.query(Referral).filter_by(referrer_id=telegram_id).order_by(Referral.created_at.desc()).limit(limit).all()
+        referrals = session.query(Referral).filter_by(
+            referrer_id=telegram_id
+        ).order_by(Referral.created_at.desc()).limit(limit).all()
         return referrals
     except Exception as e:
         print(f"❌ שגיאה בקבלת הפניות: {e}")
@@ -291,22 +523,102 @@ def get_referred_users(telegram_id):
     finally:
         session.close()
 
-# ===================== פונקציות משימות =====================
+def get_user_attendance_history(telegram_id, days=30):
+    """קבלת היסטוריית נוכחות של משתמש"""
+    session = Session()
+    try:
+        start_date = date.today() - timedelta(days=days)
+        attendances = session.query(Attendance).filter(
+            Attendance.telegram_id == telegram_id,
+            Attendance.date >= start_date
+        ).order_by(Attendance.date.desc()).all()
+        
+        return attendances
+    except Exception as e:
+        print(f"❌ שגיאה בקבלת היסטוריית נוכחות: {e}")
+        return []
+    finally:
+        session.close()
+
+# ========== פונקציות משימות ==========
 
 def get_available_tasks(telegram_id):
     """קבלת רשימת משימות זמינות למשתמש"""
     session = Session()
     try:
+        # קבל את כל המשימות הפעילות
         tasks = session.query(Task).filter_by(is_active=True).all()
-        return tasks
+        
+        # סינון משימות שכבר הושלמו היום/השבוע/החודש
+        available_tasks = []
+        today = date.today()
+        
+        for task in tasks:
+            # בדוק אם המשתמש כבר השלים את המשימה בתדירות המתאימה
+            if task.frequency == TaskFrequency.DAILY:
+                # בדוק אם השלים היום
+                completed_today = session.query(TaskCompletion).filter(
+                    TaskCompletion.telegram_id == telegram_id,
+                    TaskCompletion.task_id == task.id,
+                    func.date(TaskCompletion.completed_at) == today
+                ).first()
+                if not completed_today:
+                    available_tasks.append(task)
+                    
+            elif task.frequency == TaskFrequency.WEEKLY:
+                # תחילת השבוע
+                start_of_week = today - timedelta(days=today.weekday())
+                completed_this_week = session.query(TaskCompletion).filter(
+                    TaskCompletion.telegram_id == telegram_id,
+                    TaskCompletion.task_id == task.id,
+                    TaskCompletion.completed_at >= start_of_week
+                ).first()
+                if not completed_this_week:
+                    available_tasks.append(task)
+                    
+            elif task.frequency == TaskFrequency.MONTHLY:
+                # תחילת החודש
+                start_of_month = date(today.year, today.month, 1)
+                completed_this_month = session.query(TaskCompletion).filter(
+                    TaskCompletion.telegram_id == telegram_id,
+                    TaskCompletion.task_id == task.id,
+                    TaskCompletion.completed_at >= start_of_month
+                ).first()
+                if not completed_this_month:
+                    available_tasks.append(task)
+                    
+            elif task.frequency == TaskFrequency.ONE_TIME:
+                # בדוק אם אי פעם השלים
+                ever_completed = session.query(TaskCompletion).filter(
+                    TaskCompletion.telegram_id == telegram_id,
+                    TaskCompletion.task_id == task.id
+                ).first()
+                if not ever_completed:
+                    available_tasks.append(task)
+        
+        return available_tasks
     except Exception as e:
         print(f"❌ שגיאה בקבלת משימות: {e}")
         return []
     finally:
         session.close()
 
+def get_user_tasks(telegram_id):
+    """קבלת רשימת המשימות של משתמש"""
+    session = Session()
+    try:
+        tasks = session.query(TaskCompletion).filter_by(
+            telegram_id=telegram_id
+        ).order_by(TaskCompletion.completed_at.desc()).all()
+        return tasks
+    except Exception as e:
+        print(f"❌ שגיאה בקבלת משימות משתמש: {e}")
+        return []
+    finally:
+        session.close()
+
 def complete_task(telegram_id, task_id, proof_text=None):
-    """השלמת משימה"""
+    """השלמת משימה עם ולידציה"""
     session = Session()
     try:
         task = session.query(Task).filter_by(id=task_id).first()
@@ -317,22 +629,61 @@ def complete_task(telegram_id, task_id, proof_text=None):
         if not user:
             return False, "משתמש לא נמצא"
         
+        # בדוק אם ניתן להשלים את המשימה
+        today = date.today()
+        
+        if task.frequency == TaskFrequency.DAILY:
+            completed_today = session.query(TaskCompletion).filter(
+                TaskCompletion.telegram_id == telegram_id,
+                TaskCompletion.task_id == task_id,
+                func.date(TaskCompletion.completed_at) == today
+            ).first()
+            if completed_today:
+                return False, "כבר השלמת משימה זו היום"
+                
+        elif task.frequency == TaskFrequency.WEEKLY:
+            start_of_week = today - timedelta(days=today.weekday())
+            completed_this_week = session.query(TaskCompletion).filter(
+                TaskCompletion.telegram_id == telegram_id,
+                TaskCompletion.task_id == task_id,
+                TaskCompletion.completed_at >= start_of_week
+            ).first()
+            if completed_this_week:
+                return False, "כבר השלמת משימה זו השבוע"
+                
+        elif task.frequency == TaskFrequency.ONE_TIME:
+            ever_completed = session.query(TaskCompletion).filter(
+                TaskCompletion.telegram_id == telegram_id,
+                TaskCompletion.task_id == task_id
+            ).first()
+            if ever_completed:
+                return False, "כבר השלמת משימה זו בעבר"
+        
+        # אם המשימה דורשת הוכחה, סמן כממתינה לאישור
+        status = TaskStatus.PENDING if task.requires_proof else TaskStatus.COMPLETED
+        
         completion = TaskCompletion(
             telegram_id=telegram_id,
             task_id=task_id,
             tokens_earned=task.tokens_reward,
             exp_earned=task.exp_reward,
-            status=TaskStatus.COMPLETED,
+            status=status,
             proof_text=proof_text
         )
         
-        user.tokens += task.tokens_reward
-        user.experience += task.exp_reward
+        # אם לא דורש אישור, הוסף את הטוקנים מיד
+        if status == TaskStatus.COMPLETED:
+            user.tokens += task.tokens_reward
+            user.experience += task.exp_reward
+            update_user_level(user)
         
         session.add(completion)
         session.commit()
         
-        return True, f"🎉 השלמת משימה! קיבלת {task.tokens_reward} טוקנים!"
+        if status == TaskStatus.COMPLETED:
+            return True, f"🎉 השלמת משימה! קיבלת {task.tokens_reward} טוקנים!"
+        else:
+            return True, f"✅ הגשת משימה לאישור! המנהל יאשר בקרוב."
             
     except Exception as e:
         session.rollback()
@@ -341,23 +692,140 @@ def complete_task(telegram_id, task_id, proof_text=None):
     finally:
         session.close()
 
-# ===================== פונקציות סטטיסטיקה =====================
+def get_pending_tasks():
+    """קבלת משימות ממתינות לאישור"""
+    session = Session()
+    try:
+        tasks = session.query(TaskCompletion).filter_by(
+            status=TaskStatus.PENDING
+        ).order_by(TaskCompletion.completed_at).all()
+        return tasks
+    except Exception as e:
+        print(f"❌ שגיאה בקבלת משימות ממתינות: {e}")
+        return []
+    finally:
+        session.close()
+
+def approve_task(task_completion_id, admin_id):
+    """אישור משימה על ידי מנהל"""
+    session = Session()
+    try:
+        completion = session.query(TaskCompletion).filter_by(id=task_completion_id).first()
+        if not completion:
+            return False, "השלמת משימה לא נמצאה"
+        
+        if completion.status != TaskStatus.PENDING:
+            return False, "המשימה כבר אושרה או נדחתה"
+        
+        task = session.query(Task).filter_by(id=completion.task_id).first()
+        user = session.query(User).filter_by(telegram_id=completion.telegram_id).first()
+        
+        if not task or not user:
+            return False, "שגיאה בנתונים"
+        
+        # עדכן סטטוס והוסף טוקנים
+        completion.status = TaskStatus.COMPLETED
+        completion.verified_by = admin_id
+        
+        user.tokens += completion.tokens_earned
+        user.experience += completion.exp_earned
+        update_user_level(user)
+        
+        session.commit()
+        return True, f"✅ המשימה אושרה! המשתמש קיבל {completion.tokens_earned} טוקנים."
+        
+    except Exception as e:
+        session.rollback()
+        print(f"❌ שגיאה באישור משימה: {e}")
+        return False, f"שגיאה: {str(e)}"
+    finally:
+        session.close()
+
+def reject_task(task_completion_id, admin_id, reason=None):
+    """דחיית משימה על ידי מנהל"""
+    session = Session()
+    try:
+        completion = session.query(TaskCompletion).filter_by(id=task_completion_id).first()
+        if not completion:
+            return False, "השלמת משימה לא נמצאה"
+        
+        if completion.status != TaskStatus.PENDING:
+            return False, "המשימה כבר אושרה או נדחתה"
+        
+        completion.status = TaskStatus.LOCKED
+        completion.verified_by = admin_id
+        if reason:
+            completion.proof_text = f"נדחה: {reason}\n\n{completion.proof_text}"
+        
+        session.commit()
+        return True, "❌ המשימה נדחתה."
+        
+    except Exception as e:
+        session.rollback()
+        print(f"❌ שגיאה בדחיית משימה: {e}")
+        return False, f"שגיאה: {str(e)}"
+    finally:
+        session.close()
+
+# ========== פונקציות סטטיסטיקה ==========
 
 def get_system_stats():
-    """קבלת סטטיסטיקות מערכת"""
+    """קבלת סטטיסטיקות מערכת מקיפות"""
     session = Session()
     try:
         from sqlalchemy import func
+        
+        # סטטיסטיקות בסיסיות
         total_users = session.query(User).count()
         active_today = session.query(Attendance).filter(
             Attendance.date == date.today()
         ).distinct(Attendance.telegram_id).count()
         total_tokens = session.query(func.sum(User.tokens)).scalar() or 0
         
+        # סטטיסטיקות מתקדמות
+        total_referrals = session.query(Referral).count()
+        total_tasks_completed = session.query(TaskCompletion).filter_by(
+            status=TaskStatus.COMPLETED
+        ).count()
+        
+        # חישוב ממוצעים
+        avg_tokens = total_tokens / total_users if total_users > 0 else 0
+        avg_level = session.query(func.avg(User.level)).scalar() or 0
+        
+        # התפלגות רמות
+        level_distribution = {}
+        for i in range(1, 11):
+            count = session.query(User).filter_by(level=i).count()
+            level_distribution[f'level_{i}'] = count
+        
+        # משימות פופולריות
+        popular_tasks = session.query(
+            TaskCompletion.task_id,
+            func.count(TaskCompletion.task_id).label('count')
+        ).filter_by(status=TaskStatus.COMPLETED).group_by(
+            TaskCompletion.task_id
+        ).order_by(desc('count')).limit(5).all()
+        
+        popular_tasks_data = []
+        for task_id, count in popular_tasks:
+            task = session.query(Task).filter_by(id=task_id).first()
+            if task:
+                popular_tasks_data.append({
+                    'name': task.name,
+                    'count': count
+                })
+        
         return {
             'total_users': total_users,
             'active_today': active_today,
-            'total_tokens': total_tokens
+            'total_tokens': total_tokens,
+            'total_referrals': total_referrals,
+            'total_tasks_completed': total_tasks_completed,
+            'avg_tokens': round(avg_tokens, 2),
+            'avg_level': round(avg_level, 2),
+            'level_distribution': level_distribution,
+            'popular_tasks': popular_tasks_data,
+            'timestamp': datetime.now().isoformat()
         }
     except Exception as e:
         print(f"❌ שגיאה בקבלת סטטיסטיקות: {e}")
@@ -366,7 +834,7 @@ def get_system_stats():
         session.close()
 
 def get_checkin_data(days=7):
-    """קבלת נתוני צ'ק-אין ל-7 ימים אחרונים"""
+    """קבלת נתוני צ'ק-אין לימים אחרונים"""
     session = Session()
     try:
         data = []
@@ -399,29 +867,72 @@ def get_activity_count():
     finally:
         session.close()
 
-# ===================== פונקציות אדמין =====================
+def get_user_activity_report(telegram_id, days=30):
+    """קבלת דוח פעילות של משתמש"""
+    session = Session()
+    try:
+        start_date = date.today() - timedelta(days=days)
+        
+        # צ'ק-אין
+        checkins = session.query(Attendance).filter(
+            Attendance.telegram_id == telegram_id,
+            Attendance.date >= start_date
+        ).all()
+        
+        # משימות
+        tasks = session.query(TaskCompletion).filter(
+            TaskCompletion.telegram_id == telegram_id,
+            TaskCompletion.completed_at >= start_date
+        ).all()
+        
+        # הפניות
+        referrals = session.query(Referral).filter(
+            Referral.referrer_id == telegram_id,
+            Referral.created_at >= start_date
+        ).all()
+        
+        return {
+            'checkins': len(checkins),
+            'tasks': len(tasks),
+            'referrals': len(referrals),
+            'tokens_earned': sum(c.tokens_earned for c in checkins) + sum(t.tokens_earned for t in tasks),
+            'days_active': len(set(c.date for c in checkins))
+        }
+    except Exception as e:
+        print(f"❌ שגיאה בקבלת דוח פעילות: {e}")
+        return {}
+    finally:
+        session.close()
 
-def add_tokens_to_user(telegram_id, amount):
-    """הוספת טוקנים למשתמש (פונקציית אדמין)"""
+# ========== פונקציות אדמין ==========
+
+def add_tokens_to_user(telegram_id, amount, reason=None):
+    """הוספת טוקנים למשתמש עם סיבה"""
     session = Session()
     try:
         user = session.query(User).filter_by(telegram_id=telegram_id).first()
         if not user:
-            return False, 0
+            return False, 0, "משתמש לא נמצא"
         
         user.tokens += amount
+        
+        # רישום לעקביות
+        if reason:
+            # ניתן ליצור כאן טבלת היסטוריית טרנזקציות
+            pass
+        
         session.commit()
         
-        return True, user.tokens
+        return True, user.tokens, f"✅ נוספו {amount} טוקנים ל{user.first_name}"
     except Exception as e:
         session.rollback()
         print(f"❌ שגיאה בהוספת טוקנים: {e}")
-        return False, 0
+        return False, 0, f"שגיאה: {str(e)}"
     finally:
         session.close()
 
 def reset_user_checkin(telegram_id):
-    """איפוס צ'ק-אין של משתמש (פונקציית אדמין)"""
+    """איפוס צ'ק-אין של משתמש"""
     session = Session()
     try:
         today = date.today()
@@ -433,20 +944,27 @@ def reset_user_checkin(telegram_id):
         ).first()
         
         if attendance:
+            # החזר את הטוקנים
+            user = session.query(User).filter_by(telegram_id=telegram_id).first()
+            if user:
+                user.tokens -= attendance.tokens_earned
+                if user.tokens < 0:
+                    user.tokens = 0
+            
             session.delete(attendance)
             session.commit()
-            return True
+            return True, "✅ צ'ק-אין אופס בהצלחה"
         
-        return False
+        return False, "לא נמצא צ'ק-אין לאיפוס"
     except Exception as e:
         session.rollback()
         print(f"❌ שגיאה באיפוס צ'ק-אין: {e}")
-        return False
+        return False, f"שגיאה: {str(e)}"
     finally:
         session.close()
 
-def broadcast_message_to_all(message):
-    """שליחת הודעה לכל המשתמשים (פונקציית אדמין)"""
+def broadcast_message_to_all():
+    """קבלת כל משתמשי המערכת לשידור"""
     session = Session()
     try:
         users = session.query(User).all()
@@ -458,3 +976,129 @@ def broadcast_message_to_all(message):
         return []
     finally:
         session.close()
+
+def create_new_task(task_data):
+    """יצירת משימה חדשה"""
+    session = Session()
+    try:
+        task = Task(**task_data)
+        session.add(task)
+        session.commit()
+        return True, task.id, "✅ משימה נוצרה בהצלחה"
+    except Exception as e:
+        session.rollback()
+        print(f"❌ שגיאה ביצירת משימה: {e}")
+        return False, None, f"שגיאה: {str(e)}"
+    finally:
+        session.close()
+
+def get_user_leaderboard_position(telegram_id, category='tokens'):
+    """קבלת מיקום המשתמש בטבלת המובילים"""
+    session = Session()
+    try:
+        if category == 'tokens':
+            # ספור כמה משתמשים עם יותר טוקנים
+            user = session.query(User).filter_by(telegram_id=telegram_id).first()
+            if not user:
+                return None
+            
+            position = session.query(User).filter(User.tokens > user.tokens).count() + 1
+            total = session.query(User).count()
+            
+            return {
+                'position': position,
+                'total': total,
+                'percentage': int((position / total) * 100) if total > 0 else 0
+            }
+        
+        elif category == 'level':
+            user = session.query(User).filter_by(telegram_id=telegram_id).first()
+            if not user:
+                return None
+            
+            position = session.query(User).filter(
+                or_(
+                    User.level > user.level,
+                    and_(User.level == user.level, User.experience > user.experience)
+                )
+            ).count() + 1
+            
+            total = session.query(User).count()
+            
+            return {
+                'position': position,
+                'total': total,
+                'percentage': int((position / total) * 100) if total > 0 else 0
+            }
+        
+        return None
+    except Exception as e:
+        print(f"❌ שגיאה בקבלת מיקום בטבלה: {e}")
+        return None
+    finally:
+        session.close()
+
+# ========== פונקציות API ==========
+
+def get_api_stats():
+    """נתונים עבור API"""
+    stats = get_system_stats()
+    
+    return {
+        'status': 'success',
+        'data': {
+            'users': {
+                'total': stats.get('total_users', 0),
+                'active_today': stats.get('active_today', 0),
+                'avg_tokens': stats.get('avg_tokens', 0),
+                'avg_level': stats.get('avg_level', 0)
+            },
+            'tokens': {
+                'total': stats.get('total_tokens', 0),
+                'distribution': stats.get('level_distribution', {})
+            },
+            'activity': {
+                'referrals': stats.get('total_referrals', 0),
+                'tasks_completed': stats.get('total_tasks_completed', 0),
+                'popular_tasks': stats.get('popular_tasks', [])
+            },
+            'timestamp': stats.get('timestamp', datetime.now().isoformat())
+        }
+    }
+
+def search_users(query, limit=20):
+    """חיפוש משתמשים לפי שם, שם משתמש או מזהה"""
+    session = Session()
+    try:
+        users = session.query(User).filter(
+            or_(
+                User.first_name.ilike(f"%{query}%"),
+                User.last_name.ilike(f"%{query}%"),
+                User.username.ilike(f"%{query}%"),
+                User.telegram_id.cast(String).ilike(f"%{query}%")
+            )
+        ).limit(limit).all()
+        
+        return users
+    except Exception as e:
+        print(f"❌ שגיאה בחיפוש משתמשים: {e}")
+        return []
+    finally:
+        session.close()
+
+# ========== ייצוא פונקציות ==========
+__all__ = [
+    'init_database',
+    'register_user', 'checkin_user', 'get_user', 'get_all_users',
+    'get_balance', 'get_user_level_info', 'update_user_level',
+    'get_top_users', 'calculate_user_streak',
+    'get_user_referrals', 'get_total_referrals', 'get_referred_users',
+    'get_user_attendance_history',
+    'get_available_tasks', 'get_user_tasks', 'complete_task',
+    'get_pending_tasks', 'approve_task', 'reject_task',
+    'get_system_stats', 'get_checkin_data', 'get_activity_count',
+    'get_user_activity_report',
+    'add_tokens_to_user', 'reset_user_checkin', 'broadcast_message_to_all',
+    'create_new_task', 'get_user_leaderboard_position',
+    'get_api_stats', 'search_users'
+]
