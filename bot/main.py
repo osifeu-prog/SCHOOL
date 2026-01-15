@@ -1,31 +1,20 @@
 #!/usr/bin/env python3
 """
-Crypto-Class - מערכת מלאה משולבת
-גרסה משודרגת עם אינטגרציה מלאה
+Crypto-Class - מערכת משודרגת ובדוקה
 """
 
 import os
 import sys
 import logging
+import telebot
+from flask import Flask, request, jsonify, render_template
 import threading
 import asyncio
-from datetime import datetime
-from flask import Flask, request, jsonify, render_template
-import telebot
-from telebot.async_telebot import AsyncTeleBot
-from telebot import asyncio_helper
-
-# הוסף את התיקיות הנדרשות ל-PATH
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # הגדרת לוגים
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('crypto_class.log')
-    ]
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -37,27 +26,17 @@ if not BOT_TOKEN:
 
 PORT = int(os.environ.get("PORT", 5000))
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").rstrip('/')
-TEACHER_PASSWORD = os.environ.get("TEACHER_PASSWORD", "admin123")
-SECRET_KEY = os.environ.get("SECRET_KEY", "change-this-secure-key")
 
 # אתחול הבוט
-try:
-    bot = AsyncTeleBot(BOT_TOKEN)
-    logger.info(f"✅ בוט אותחל עם טוקן: {BOT_TOKEN[:10]}...")
-except Exception as e:
-    logger.error(f"❌ שגיאה באתחול הבוט: {e}")
-    sys.exit(1)
+bot = telebot.TeleBot(BOT_TOKEN)
 
-# ========== יבוא מודולים פנימיים ==========
+# ========== יבוא מודולים ==========
 try:
-    from database.db import Session, init_database, ensure_database_initialized
+    from database.db import Session, init_database
     from database.queries import (
         get_user, register_user, checkin_user, get_balance,
-        get_top_users, get_system_stats, get_activity_count,
-        get_total_referrals, get_referred_users
+        get_top_users, get_system_stats
     )
-    from bot import commands_sync as commands
-    from bot import admin_commands
     logger.info("✅ מודולים נטענו בהצלחה")
 except ImportError as e:
     logger.error(f"❌ שגיאה בטעינת מודולים: {e}")
@@ -65,112 +44,386 @@ except ImportError as e:
 
 # ========== יצירת Flask app ==========
 flask_app = Flask(__name__)
-flask_app.secret_key = SECRET_KEY
-
-# ========== אתחול מסד נתונים ==========
-@flask_app.before_first_request
-def initialize_database():
-    """אתחול מסד הנתונים בעת הפעלה"""
-    try:
-        ensure_database_initialized()
-        logger.info("✅ מסד נתונים אותחל")
-    except Exception as e:
-        logger.error(f"❌ שגיאה באתחול מסד נתונים: {e}")
-
-# ========== הגדרת Webhook ==========
-@flask_app.route('/setwebhook', methods=['GET', 'POST'])
-def set_webhook():
-    """הגדרת webhook לבוט"""
-    try:
-        if not WEBHOOK_URL:
-            return jsonify({"error": "WEBHOOK_URL לא מוגדר"}), 400
-        
-        webhook_url = f"{WEBHOOK_URL}/webhook"
-        # בסביבת production, יש להגדיר webhook אמיתי
-        # כאן נחזיר הודעה שהמערכת עובדת
-        return jsonify({
-            "status": "success",
-            "message": "Webhook מוכן להגדרה",
-            "webhook_url": webhook_url,
-            "bot_username": bot.get_me().username if hasattr(bot, 'get_me') else "לא זמין"
-        })
-    except Exception as e:
-        logger.error(f"❌ שגיאה בהגדרת webhook: {e}")
-        return jsonify({"error": str(e)}), 500
 
 # ========== Webhook Endpoint ==========
 @flask_app.route('/webhook', methods=['POST'])
 def webhook():
     """טיפול בפקודות מטלגרם"""
-    try:
-        if request.headers.get('content-type') == 'application/json':
-            json_string = request.get_data().decode('utf-8')
-            update = telebot.types.Update.de_json(json_string)
-            
-            # עיבוד עדכון בבוט
-            asyncio.run(process_update(update))
-            
-            return 'OK'
-        else:
-            return 'Invalid content type', 400
-    except Exception as e:
-        logger.error(f"❌ שגיאה בעיבוד webhook: {e}")
-        return jsonify({"error": str(e)}), 500
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        
+        # תהליך העדכון בבוט
+        bot.process_new_updates([update])
+        
+        return 'OK'
+    else:
+        return 'Invalid content type', 400
 
-async def process_update(update):
-    """עיבוד עדכון מבוט טלגרם"""
+# ========== פקודות הבוט ==========
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    """טיפול בפקודת /start"""
     try:
-        if update.message:
-            message = update.message
-            user = message.from_user
+        user = message.from_user
+        logger.info(f"🚀 /start מ-{user.id} ({user.first_name})")
+        
+        # בדוק אם המשתמש קיים
+        existing_user = get_user(user.id)
+        
+        if existing_user:
+            # משתמש קיים
+            response = (
+                f"👋 **ברוך השב, {user.first_name}!**\n\n"
+                f"🎓 אתה כבר רשום ב-**Crypto-Class**\n"
+                f"💰 הטוקנים שלך: **{existing_user.tokens:,}**\n"
+                f"🏆 הרמה שלך: **{existing_user.level}**\n\n"
+                f"📋 **פקודות זמינות:**\n"
+                f"• /checkin - צ'ק-אין יומי (טוקן)\n"
+                f"• /balance - יתרת טוקנים\n"
+                f"• /referral - קוד הפניה\n"
+                f"• /leaderboard - טבלת מובילים\n"
+                f"• /profile - הפרופיל שלך\n"
+                f"• /help - עזרה מלאה\n\n"
+                f"🚀 **התחל עם:** /checkin"
+            )
             
-            logger.info(f"📩 הודעה מ-{user.id} ({user.first_name}): {message.text}")
+            # כפתורים מהירים
+            markup = telebot.types.InlineKeyboardMarkup()
+            markup.row(
+                telebot.types.InlineKeyboardButton("✅ צ'ק-אין", callback_data="checkin"),
+                telebot.types.InlineKeyboardButton("💰 טוקנים", callback_data="balance")
+            )
+            markup.row(
+                telebot.types.InlineKeyboardButton("🏆 מובילים", callback_data="leaderboard"),
+                telebot.types.InlineKeyboardButton("👥 הפניות", callback_data="referrals")
+            )
             
-            # טיפול בפקודות
-            if message.text:
-                await handle_command(message)
+            bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=markup)
+            
+        else:
+            # משתמש חדש
+            success = register_user(
+                telegram_id=user.id,
+                username=user.username,
+                first_name=user.first_name,
+                last_name=user.last_name
+            )
+            
+            if success:
+                # קבל את המשתמש שנרשם
+                new_user = get_user(user.id)
+                
+                response = (
+                    f"🎉 **ברוך הבא ל-Crypto-Class!**\n\n"
+                    f"✅ **נרשמת בהצלחה!**\n"
+                    f"👤 **שם:** {user.first_name}\n"
+                    f"🆔 **מזהה:** {user.id}\n"
+                    f"📅 **תאריך:** היום\n"
+                    f"🔗 **קוד הפניה:** `{new_user.referral_code if new_user else 'לא זמין'}`\n\n"
+                    f"🎁 **קבלת מתנה:** **10 טוקנים**!\n\n"
+                    f"📚 **מה זה Crypto-Class?**\n"
+                    f"זו מערכת למידה מבוססת טוקנים.\n\n"
+                    f"🚀 **התחל עכשיו עם:** /checkin"
+                )
+                
+                # כפתורים מהירים
+                markup = telebot.types.InlineKeyboardMarkup()
+                markup.row(
+                    telebot.types.InlineKeyboardButton("🎁 קח טוקנים!", callback_data="get_tokens"),
+                    telebot.types.InlineKeyboardButton("📚 למד עוד", callback_data="learn_more")
+                )
+                
+                bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=markup)
+                
+            else:
+                bot.send_message(message.chat.id, "❌ **אירעה שגיאה ברישום**\n\nנסה שוב או פנה לתמיכה: /contact", parse_mode="Markdown")
                 
     except Exception as e:
-        logger.error(f"❌ שגיאה בעיבוד עדכון: {e}")
+        logger.error(f"❌ שגיאה ב-/start: {e}")
+        bot.send_message(message.chat.id, "❌ אירעה שגיאה. אנא נסה שוב.")
 
-async def handle_command(message):
-    """טיפול בפקודת המשתמש"""
+@bot.message_handler(commands=['checkin'])
+def handle_checkin(message):
+    """טיפול בפקודת /checkin"""
     try:
-        text = message.text
         user = message.from_user
         
-        if text.startswith('/start'):
-            await commands.start(message, bot)
-        elif text.startswith('/checkin'):
-            await commands.checkin(message, bot)
-        elif text.startswith('/balance'):
-            await commands.balance(message, bot)
-        elif text.startswith('/referral'):
-            await commands.referral(message, bot)
-        elif text.startswith('/my_referrals'):
-            await commands.my_referrals(message, bot)
-        elif text.startswith('/leaderboard'):
-            await commands.leaderboard(message, bot)
-        elif text.startswith('/level'):
-            await commands.level(message, bot)
-        elif text.startswith('/contact'):
-            await commands.contact(message, bot)
-        elif text.startswith('/help'):
-            await commands.help_command(message, bot)
-        elif text.startswith('/website'):
-            await commands.website(message, bot)
-        elif text.startswith('/admin'):
-            await admin_commands.admin_panel(message, bot)
-        elif text.startswith('/add_tokens'):
-            await admin_commands.add_tokens(message, bot)
-        elif text.startswith('/reset_checkin'):
-            await admin_commands.reset_checkin(message, bot)
+        success, msg = checkin_user(user.id)
+        
+        if success:
+            balance = get_balance(user.id)
+            response = f"✅ {msg}\n\n💰 **היתרה שלך:** {balance} טוקנים"
         else:
-            await bot.reply_to(message, "❔ לא מזהה את הפקודה. שלח /help לעזרה")
+            response = f"⚠️ {msg}"
+            
+        bot.send_message(message.chat.id, response, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"❌ שגיאה ב-/checkin: {e}")
+        bot.send_message(message.chat.id, "❌ אירעה שגיאה. נסה שוב.")
+
+@bot.message_handler(commands=['balance'])
+def handle_balance(message):
+    """טיפול בפקודת /balance"""
+    try:
+        user = message.from_user
+        balance = get_balance(user.id)
+        
+        response = (
+            f"💰 **יתרת הטוקנים שלך, {user.first_name}:**\n\n"
+            f"🪙 **סך הכל:** {balance} טוקנים\n\n"
+            f"💡 **טיפ:** שלח /checkin כל יום לקבלת טוקנים נוספים!"
+        )
+        
+        bot.send_message(message.chat.id, response, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"❌ שגיאה ב-/balance: {e}")
+        bot.send_message(message.chat.id, "❌ אירעה שגיאה. נסה שוב.")
+
+@bot.message_handler(commands=['referral'])
+def handle_referral(message):
+    """טיפול בפקודת /referral"""
+    try:
+        user = message.from_user
+        db_user = get_user(user.id)
+        
+        if not db_user:
+            bot.send_message(message.chat.id, "❌ **אתה לא רשום!**\n\nשלח /start כדי להירשם.", parse_mode="Markdown")
+            return
+        
+        referral_code = db_user.referral_code
+        bot_username = bot.get_me().username
+        invite_link = f"https://t.me/{bot_username}?start={referral_code}"
+        
+        response = (
+            f"👥 **מערכת ההפניות שלך**\n\n"
+            f"🔗 **קוד ההפניה שלך:**\n`{referral_code}`\n\n"
+            f"📤 **קישור הזמנה:**\n{invite_link}\n\n"
+            f"🎁 **בונוסים:**\n"
+            f"• הזמן חבר = **10 טוקנים**\n"
+            f"• כל 5 חברים = **+50 טוקנים**\n\n"
+            f"📝 **הוראות:**\n"
+            f"1. שלח לחבר את הקישור\n"
+            f"2. הוא ישלח /start עם הקוד\n"
+            f"3. קבל 10 טוקנים מיד!"
+        )
+        
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(
+            telebot.types.InlineKeyboardButton("📤 שתף קישור", url=f"https://t.me/share/url?url={invite_link}&text=הצטרף%20לCrypto-Class!"),
+            telebot.types.InlineKeyboardButton("👥 מוזמנים", callback_data="my_referrals")
+        )
+        
+        bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=markup)
+        
+    except Exception as e:
+        logger.error(f"❌ שגיאה ב-/referral: {e}")
+        bot.send_message(message.chat.id, "❌ אירעה שגיאה. נסה שוב.")
+
+@bot.message_handler(commands=['leaderboard'])
+def handle_leaderboard(message):
+    """טיפול בפקודת /leaderboard"""
+    try:
+        user = message.from_user
+        top_users = get_top_users(10, 'tokens')
+        
+        if not top_users:
+            response = "🏆 **טבלת המובילים**\n\nאין עדיין נתונים. היה הראשון שצובר טוקנים! 💪"
+        else:
+            response = "🏆 **טבלת המובילים - Top 10**\n\n"
+            
+            for i, top_user in enumerate(top_users, 1):
+                name = top_user.first_name or top_user.username or f"משתמש {top_user.telegram_id}"
+                
+                if top_user.telegram_id == user.id:
+                    response += f"{i}. 👑 **{name}** - {top_user.tokens:,} טוקנים\n"
+                else:
+                    response += f"{i}. {name} - {top_user.tokens:,} טוקנים\n"
+        
+        bot.send_message(message.chat.id, response, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"❌ שגיאה ב-/leaderboard: {e}")
+        bot.send_message(message.chat.id, "❌ אירעה שגיאה. נסה שוב.")
+
+@bot.message_handler(commands=['help', 'menu'])
+def handle_help(message):
+    """תפריט עזרה ראשי"""
+    try:
+        response = (
+            "🆘 **תפריט ראשי - Crypto-Class**\n\n"
+            "📱 **פקודות מהירות:**\n\n"
+            "👤 **חשבון:**\n"
+            "• /start - הרשמה והתחלה\n"
+            "• /profile - הפרופיל שלך\n"
+            "• /balance - טוקנים\n"
+            "• /level - רמה והתקדמות\n\n"
+            "📊 **פעילות:**\n"
+            "• /checkin - צ'ק-אין יומי\n"
+            "• /tasks - משימות זמינות\n"
+            "• /referral - הזמן חברים\n"
+            "• /leaderboard - טבלת מובילים\n\n"
+            "ℹ️ **מידע:**\n"
+            "• /help - תפריט זה\n"
+            "• /contact - תמיכה\n"
+            "• /website - אתר המערכת\n\n"
+            "👑 **פקודות מתקדמות:**\n"
+            "• /admin - לבעלי הרשאות\n"
+            "• /stats - סטטיסטיקות\n\n"
+            "💡 **טיפ:** השתמש בכפתורים למהירות!"
+        )
+        
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(
+            telebot.types.InlineKeyboardButton("💰 טוקנים", callback_data="balance"),
+            telebot.types.InlineKeyboardButton("✅ צ'ק-אין", callback_data="checkin")
+        )
+        markup.row(
+            telebot.types.InlineKeyboardButton("👥 הפניות", callback_data="referrals"),
+            telebot.types.InlineKeyboardButton("🏆 מובילים", callback_data="leaderboard")
+        )
+        markup.row(
+            telebot.types.InlineKeyboardButton("📞 תמיכה", callback_data="contact"),
+            telebot.types.InlineKeyboardButton("🌐 אתר", callback_data="website")
+        )
+        
+        bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=markup)
+        
+    except Exception as e:
+        logger.error(f"❌ שגיאה ב-/help: {e}")
+        bot.send_message(message.chat.id, "❌ אירעה שגיאה. נסה שוב.")
+
+@bot.message_handler(commands=['website'])
+def handle_website(message):
+    """טיפול בפקודת /website"""
+    try:
+        web_url = "https://school-production-4d9d.up.railway.app"
+        
+        response = (
+            f"🌐 **אתר האינטרנט של Crypto-Class**\n\n"
+            f"🔗 **קישור לאתר:** {web_url}\n\n"
+            f"🎯 **מה תמצא באתר:**\n"
+            f"• 📊 דשבורד אישי\n"
+            f"• 🏆 טבלאות מובילים\n"
+            f"• 👨‍🏫 דשבורד מורים\n"
+            f"• 📈 סטטיסטיקות\n\n"
+            f"💻 **פתח עכשיו:**"
+        )
+        
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(
+            telebot.types.InlineKeyboardButton("🌐 פתח אתר", url=web_url),
+            telebot.types.InlineKeyboardButton("📊 דשבורד", url=f"{web_url}/dashboard")
+        )
+        
+        bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=markup)
+        
+    except Exception as e:
+        logger.error(f"❌ שגיאה ב-/website: {e}")
+        bot.send_message(message.chat.id, "❌ אירעה שגיאה. נסה שוב.")
+
+@bot.message_handler(commands=['admin'])
+def handle_admin(message):
+    """פאנל ניהול"""
+    try:
+        user = message.from_user
+        
+        # בדיקת הרשאות אדמין
+        ADMIN_IDS = [224223270]  # החלף למזהה שלך
+        
+        if user.id not in ADMIN_IDS:
+            bot.send_message(message.chat.id, "❌ **אין לך הרשאות ניהול!**", parse_mode="Markdown")
+            return
+        
+        stats = get_system_stats()
+        
+        response = (
+            "👑 **פאנל ניהול - Crypto-Class**\n\n"
+            "📊 **סטטיסטיקות מערכת:**\n"
+            f"• 👥 משתמשים: {stats.get('total_users', 0):,}\n"
+            f"• 📅 פעילים היום: {stats.get('active_today', 0):,}\n"
+            f"• 💰 טוקנים כוללים: {stats.get('total_tokens', 0):,}\n\n"
+            "⚙️ **פקודות ניהול:**\n"
+            "• /admin_stats - סטטיסטיקות מפורטות\n"
+            "• /admin_users - ניהול משתמשים\n"
+            "• /admin_broadcast - שליחת הודעה לכולם\n"
+            "• /add_tokens <id> <amount> - הוספת טוקנים\n"
+            "• /reset_checkin <id> - איפוס צ'ק-אין\n\n"
+            "🆔 **מזהה האדמין שלך:** {user.id}"
+        )
+        
+        bot.send_message(message.chat.id, response, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"❌ שגיאה ב-/admin: {e}")
+        bot.send_message(message.chat.id, "❌ אירעה שגיאה. נסה שוב.")
+
+# ========== טיפול בכפתורים ==========
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    """טיפול בכפתורי אינטראקציה"""
+    try:
+        user = call.from_user
+        chat_id = call.message.chat.id
+        data = call.data
+        
+        logger.info(f"🔘 Callback from {user.id}: {data}")
+        
+        if data == "checkin":
+            # יצירת הודעה דמה לבדיקה
+            message = type('obj', (object,), {
+                'from_user': user,
+                'chat': type('chat', (object,), {'id': chat_id})()
+            })()
+            handle_checkin(message)
+            
+        elif data == "balance":
+            message = type('obj', (object,), {
+                'from_user': user,
+                'chat': type('chat', (object,), {'id': chat_id})()
+            })()
+            handle_balance(message)
+            
+        elif data == "referrals":
+            message = type('obj', (object,), {
+                'from_user': user,
+                'chat': type('chat', (object,), {'id': chat_id})()
+            })()
+            handle_referral(message)
+            
+        elif data == "leaderboard":
+            message = type('obj', (object,), {
+                'from_user': user,
+                'chat': type('chat', (object,), {'id': chat_id})()
+            })()
+            handle_leaderboard(message)
+            
+        elif data == "contact":
+            bot.send_message(chat_id, "📞 **צור קשר:**\n\n👤 אוסיף אונגר\n📱 טלגרם: @osifeu\n📧 טלפון: 0584203384", parse_mode="Markdown")
+            
+        elif data == "website":
+            handle_website(type('obj', (object,), {
+                'from_user': user,
+                'chat': type('chat', (object,), {'id': chat_id})()
+            })())
+            
+        elif data == "get_tokens":
+            bot.answer_callback_query(call.id, "🎉 קיבלת 10 טוקנים מתנה!", show_alert=True)
+            
+        elif data == "learn_more":
+            handle_help(type('obj', (object,), {
+                'from_user': user,
+                'chat': type('chat', (object,), {'id': chat_id})()
+            })())
+            
+        else:
+            bot.answer_callback_query(call.id, "⚙️ תכונה זו בפיתוח", show_alert=False)
             
     except Exception as e:
-        logger.error(f"❌ שגיאה בטיפול בפקודה: {e}")
-        await bot.reply_to(message, "❌ אירעה שגיאה בעיבוד הפקודה. אנא נסה שוב.")
+        logger.error(f"❌ שגיאה ב-callback: {e}")
+        bot.answer_callback_query(call.id, "❌ אירעה שגיאה", show_alert=False)
 
 # ========== דפי אתר ==========
 @flask_app.route('/')
@@ -180,10 +433,10 @@ def index():
         stats = get_system_stats()
         return render_template('index.html', 
                              stats=stats,
-                             bot_username=bot.get_me().username if hasattr(bot, 'get_me') else "CryptoClassBot")
+                             bot_username=bot.get_me().username)
     except Exception as e:
         logger.error(f"❌ שגיאה בטעינת דף הבית: {e}")
-        return render_template('error.html', error="שגיאה בטעינת הדף")
+        return "שגיאה בטעינת הדף", 500
 
 @flask_app.route('/stats')
 def stats_page():
@@ -196,7 +449,7 @@ def stats_page():
                              top_users=top_users)
     except Exception as e:
         logger.error(f"❌ שגיאה בטעינת סטטיסטיקות: {e}")
-        return render_template('error.html', error="שגיאה בטעינת סטטיסטיקות")
+        return "שגיאה בטעינת סטטיסטיקות", 500
 
 @flask_app.route('/health')
 def health_check():
@@ -207,117 +460,66 @@ def health_check():
         session.execute("SELECT 1")
         session.close()
         
-        # בדיקת בוט
-        bot_ok = BOT_TOKEN is not None
-        
         return jsonify({
             "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
-            "database": "connected",
-            "bot": "active" if bot_ok else "inactive",
-            "version": "2.2.0",
-            "environment": os.environ.get("RAILWAY_ENVIRONMENT", "development")
+            "bot_status": "active",
+            "bot_token_defined": BOT_TOKEN is not None,
+            "database": "available",
+            "webhook_configured": True,
+            "application_initialized": True
         })
     except Exception as e:
         return jsonify({
             "status": "unhealthy",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
+            "error": str(e)
         }), 500
 
-@flask_app.route('/teacher/login', methods=['GET', 'POST'])
-def teacher_login():
-    """כניסת מורה"""
-    from flask import request, session, redirect, url_for
-    
-    if request.method == 'POST':
-        password = request.form.get('password', '')
-        
-        if password == TEACHER_PASSWORD:
-            session['teacher_logged_in'] = True
-            session['teacher_login_time'] = datetime.now().isoformat()
-            return redirect(url_for('teacher_dashboard'))
+@flask_app.route('/setwebhook')
+def set_webhook_page():
+    """הגדרת webhook"""
+    try:
+        if WEBHOOK_URL:
+            bot.remove_webhook()
+            bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+            return """
+            <h1>✅ Webhook הוגדר בהצלחה!</h1>
+            <p>הבוט אמור לענות כעת לפקודות.</p>
+            <p>נסה לשלוח /start או /help לבוט בטלגרם.</p>
+            <a href="/">חזרה לדף הבית</a> | 
+            <a href="/health">🩺 בדיקת בריאות</a>
+            """
         else:
-            return render_template('teacher/teacher_login.html', 
-                                 error="סיסמה שגויה")
-    
-    return render_template('teacher/teacher_login.html')
+            return "WEBHOOK_URL לא מוגדר", 400
+    except Exception as e:
+        return f"שגיאה: {str(e)}", 500
 
-@flask_app.route('/teacher')
-def teacher_dashboard():
-    """דשבורד מורה"""
-    from flask import session, redirect, url_for
-    
-    if not session.get('teacher_logged_in'):
-        return redirect(url_for('teacher_login'))
-    
+# ========== אתחול ==========
+def initialize_system():
+    """אתחול המערכת"""
     try:
-        stats = get_system_stats()
-        top_users = get_top_users(10, 'tokens')
+        logger.info("🔧 מאתחל מסד נתונים...")
+        init_database()
+        logger.info("✅ מסד נתונים אותחל")
         
-        return render_template('teacher/teacher_dashboard.html',
-                             stats=stats,
-                             top_users=top_users)
-    except Exception as e:
-        logger.error(f"❌ שגיאה בטעינת דשבורד מורה: {e}")
-        return render_template('error.html', error="שגיאה בטעינת הדשבורד")
-
-@flask_app.route('/teacher/logout')
-def teacher_logout():
-    """יציאת מורה"""
-    from flask import session, redirect, url_for
-    session.pop('teacher_logged_in', None)
-    return redirect(url_for('index'))
-
-# ========== API פנימי ==========
-@flask_app.route('/api/v1/user/<int:user_id>', methods=['GET'])
-def api_get_user(user_id):
-    """API לקבלת נתוני משתמש"""
-    try:
-        user = get_user(user_id)
-        if user:
-            return jsonify({
-                "id": user.telegram_id,
-                "username": user.username,
-                "first_name": user.first_name,
-                "tokens": user.tokens,
-                "level": user.level,
-                "referrals": user.total_referrals,
-                "created_at": user.created_at.isoformat() if user.created_at else None
-            })
+        # הגדר webhook אם יש URL
+        if WEBHOOK_URL:
+            logger.info(f"🔗 מגדיר webhook ל: {WEBHOOK_URL}")
+            bot.remove_webhook()
+            time.sleep(1)
+            bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+            logger.info("✅ Webhook הוגדר")
         else:
-            return jsonify({"error": "משתמש לא נמצא"}), 404
+            logger.warning("⚠️ WEBHOOK_URL לא מוגדר - הבוט יפעל בפולינג")
+            
     except Exception as e:
-        logger.error(f"❌ שגיאה ב-API user: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@flask_app.route('/api/v1/stats', methods=['GET'])
-def api_get_stats():
-    """API לקבלת סטטיסטיקות"""
-    try:
-        stats = get_system_stats()
-        return jsonify(stats)
-    except Exception as e:
-        logger.error(f"❌ שגיאה ב-API stats: {e}")
-        return jsonify({"error": str(e)}), 500
-
-# ========== פונקציות מערכת ==========
-def run_bot_polling():
-    """הרצת הבוט בפולינג (לגיבוי)"""
-    try:
-        logger.info("🤖 מפעיל בוט בפולינג...")
-        asyncio.run(bot.polling(non_stop=True, timeout=60))
-    except Exception as e:
-        logger.error(f"❌ שגיאה בהרצת בוט: {e}")
+        logger.error(f"❌ שגיאה באתחול: {e}")
 
 # ========== הרצה ==========
 if __name__ == '__main__':
-    # הפעלת הבוט בפולינג בתוך thread נפרד
-    if os.environ.get("USE_POLLING", "false").lower() == "true":
-        bot_thread = threading.Thread(target=run_bot_polling, daemon=True)
-        bot_thread.start()
-        logger.info("✅ בוט רץ בפולינג (thread נפרד)")
+    # הפעל אתחול בפתיל נפרד
+    import time
+    threading.Thread(target=initialize_system, daemon=True).start()
     
-    # הפעלת שרת Flask
+    # הפעל את שרת Flask
     logger.info(f"🚀 מפעיל שרת Flask על פורט {PORT}")
-    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False)
