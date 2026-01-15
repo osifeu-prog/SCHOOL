@@ -13,7 +13,9 @@ from .queries import init_database
 __all__ = [
     'Session', 'User', 'Attendance', 'Task', 'TaskCompletion', 
     'UserDailyStats', 'Referral', 'TaskStatus', 'TaskFrequency', 
-    'TaskType', 'init_database'
+    'TaskType', 'init_database', 'get_db_session', 'close_session',
+    'get_user_by_referral_code', 'get_user_attendance_history',
+    'get_system_health', 'ensure_database_initialized'
 ]
 
 # פונקציות עזר
@@ -26,7 +28,6 @@ def close_session(session):
     if session:
         session.close()
 
-# פונקציות נוספות שימושיות
 def get_user_by_referral_code(referral_code):
     """קבלת משתמש לפי קוד הפניה"""
     session = Session()
@@ -64,7 +65,7 @@ def get_system_health():
         session.execute("SELECT 1")
         
         # בדיקת מספר טבלאות
-        from sqlalchemy import inspect, text
+        from sqlalchemy import inspect
         inspector = inspect(session.get_bind())
         tables = inspector.get_table_names()
         
@@ -86,22 +87,20 @@ def get_system_health():
     finally:
         session.close()
 
-# פונקציה לאתחול מסד נתונים אם לא קיים
 def ensure_database_initialized():
     """אתחול מסד נתונים אם לא מאותחל"""
     try:
         # בדיקה אם מסד הנתונים כבר מאותחל
         session = Session()
         user_count = session.query(User).count()
-        task_count = session.query(Task).count()
         session.close()
         
-        if user_count == 0 and task_count == 0:
+        if user_count == 0:
             print("🔧 מאתחל מסד נתונים חדש...")
             init_database()
             return True
         else:
-            print(f"✅ מסד נתונים כבר מאותחל: {user_count} משתמשים, {task_count} משימות")
+            print(f"✅ מסד נתונים כבר מאותחל: {user_count} משתמשים")
             return False
     except Exception as e:
         print(f"❌ שגיאה בבדיקת אתחול מסד נתונים: {e}")
