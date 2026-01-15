@@ -3,7 +3,6 @@
 Crypto-Class - מערכת מלאה משולבת
 גרסה 2.2.0 - יציבה ומשודרגת
 """
-
 import os
 import sys
 import logging
@@ -18,37 +17,39 @@ from telebot.async_telebot import AsyncTeleBot
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# יבוא הגדרות
+try:
+    from config import *
+except ImportError:
+    # הגדרות ברירת מחדל אם config.py לא קיים
+    BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+    PORT = int(os.environ.get("PORT", 5000))
+    WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").rstrip('/')
+    TEACHER_PASSWORD = os.environ.get("TEACHER_PASSWORD", "admin123")
+    SECRET_KEY = os.environ.get("SECRET_KEY", "crypto-class-secret-key-2026-change-this")
+    ADMIN_IDS = [224223270]
+
 # הגדרת לוגים
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('crypto_class.log')
+        logging.FileHandler(os.path.join(LOGS_DIR, 'crypto_class.log') if 'LOGS_DIR' in locals() else 'crypto_class.log')
     ]
 )
 logger = logging.getLogger(__name__)
 
-# ========== הגדרות מערכת ==========
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-if not BOT_TOKEN:
-    logger.error("❌ BOT_TOKEN לא מוגדר!")
-    # עבור בדיקות מקומיות
-    BOT_TOKEN = "dummy_token_for_testing"
-    logger.warning("⚠️ משתמש בטוקן דמי לבדיקה מקומית")
-
-PORT = int(os.environ.get("PORT", 5000))
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").rstrip('/')
-TEACHER_PASSWORD = os.environ.get("TEACHER_PASSWORD", "admin123")
-SECRET_KEY = os.environ.get("SECRET_KEY", "crypto-class-secret-key-2026-change-this")
-
 # אתחול הבוט
-try:
-    bot = AsyncTeleBot(BOT_TOKEN)
-    logger.info(f"✅ בוט אותחל")
-except Exception as e:
-    logger.error(f"❌ שגיאה באתחול הבוט: {e}")
-    # יצירת בוט דמי לבדיקה
+if BOT_TOKEN:
+    try:
+        bot = AsyncTeleBot(BOT_TOKEN)
+        logger.info("✅ בוט אותחל")
+    except Exception as e:
+        logger.error(f"❌ שגיאה באתחול הבוט: {e}")
+        bot = None
+else:
+    logger.warning("⚠️ BOT_TOKEN לא הוגדר, בוט לא יופעל")
     bot = None
 
 # ========== יבוא מודולים פנימיים ==========
@@ -498,4 +499,4 @@ if __name__ == '__main__':
     logger.info(f"📊 בריאות מערכת: http://localhost:{PORT}/health")
     logger.info(f"👨‍🏫 דשבורד מורים: http://localhost:{PORT}/teacher/login")
     
-    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+    flask_app.run(host='0.0.0.0', port=PORT, debug=DEBUG, use_reloader=False)
