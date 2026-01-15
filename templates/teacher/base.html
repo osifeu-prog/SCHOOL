@@ -3,81 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Crypto-Class{% endblock %}</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            margin: 0;
-            padding: 0;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        .header {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            backdrop-filter: blur(10px);
-        }
-        .button {
-            display: inline-block;
-            background: #4c51bf;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 5px;
-            text-decoration: none;
-            margin: 5px;
-            transition: transform 0.3s;
-        }
-        .button:hover {
-            transform: translateY(-2px);
-            background: #434190;
-        }
-        .content {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 30px;
-            border-radius: 10px;
-            backdrop-filter: blur(10px);
-            margin-bottom: 20px;
-        }
-        .status-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        .status-value {
-            font-weight: bold;
-        }
-        .healthy { color: #68d391; }
-        .unhealthy { color: #fc8181; }
-    </style>
+    <title>{% block title %}Crypto-Class - דשבורד מורים{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% block extra_css %}{% endblock %}
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>🎓 Crypto-Class</h1>
-            <p>מערכת נוכחות מבוססת בלוקצ'יין</p>
-            <div>
-                <a href="/" class="button">🏠 דף הבית</a>
-                <a href="/stats" class="button">📊 סטטיסטיקות</a>
-                <a href="/teacher/login" class="button">👨‍🏫 כניסת מורה</a>
-                <a href="/health" class="button">🩺 בריאות מערכת</a>
+        <header style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 0 0 10px 10px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h1 style="margin: 0; font-size: 1.8rem;">👨‍🏫 Crypto-Class - דשבורד מורים</h1>
+                    <p style="margin: 5px 0 0 0; opacity: 0.9;">ניהול כיתה מתקדם מבוסס טוקנים</p>
+                </div>
+                <div style="display: flex; gap: 15px;">
+                    <a href="/teacher" style="color: white; text-decoration: none; padding: 8px 15px; border-radius: 5px; background: rgba(255,255,255,0.1);">🏠 דשבורד</a>
+                    <a href="/teacher/users" style="color: white; text-decoration: none; padding: 8px 15px; border-radius: 5px; background: rgba(255,255,255,0.1);">👥 משתמשים</a>
+                    <a href="/teacher/logout" style="color: white; text-decoration: none; padding: 8px 15px; border-radius: 5px; background: #f56565;">🚪 יציאה</a>
+                </div>
             </div>
-        </div>
+        </header>
         
-        <div class="content">
+        <main>
             {% block content %}{% endblock %}
-        </div>
+        </main>
         
-        <div style="text-align: center; margin-top: 40px; opacity: 0.7;">
-            <p>Crypto-Class © 2026 | גרסה 2.1.0</p>
-        </div>
+        <footer style="text-align: center; padding: 30px 0; color: #718096; border-top: 1px solid #e2e8f0; margin-top: 40px;">
+            <p>Crypto-Class © 2026 | גרסה 2.2.0 | דשבורד מורים</p>
+            <p style="margin-top: 10px; font-size: 0.9rem;">
+                <a href="/" style="color: #667eea; margin: 0 10px;">אתר ראשי</a>
+                <a href="/stats" style="color: #667eea; margin: 0 10px;">סטטיסטיקות</a>
+                <a href="/health" style="color: #667eea; margin: 0 10px;">בריאות מערכת</a>
+            </p>
+        </footer>
     </div>
+    
+    {% block scripts %}{% endblock %}
 </body>
 </html>
