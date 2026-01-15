@@ -4,7 +4,7 @@
 גרסה מעודכנת ופשוטה
 """
 
-from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, Boolean, BigInteger, ForeignKey, JSON, Enum, Text
+from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, Boolean, BigInteger, ForeignKey, JSON, Enum, Text, Float
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from datetime import datetime, date
 import os
@@ -60,6 +60,7 @@ class User(Base):
     referral_code = Column(String(20), unique=True)
     total_referrals = Column(Integer, default=0)
     referral_tokens = Column(Integer, default=0)
+    total_experience = Column(Integer, default=0)
     
     # יחסים
     attendances = relationship("Attendance", back_populates="user", cascade="all, delete-orphan")
