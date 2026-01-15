@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Crypto-Class - מערכת מלאה משולבת
-גרסה 2.2.0 - יציבה ומשודרגת
+גרסה 2.3.0 - יציבה ומשודרגת עם כל התכונות
 """
+
 import os
 import sys
 import logging
@@ -17,39 +18,37 @@ from telebot.async_telebot import AsyncTeleBot
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# יבוא הגדרות
-try:
-    from config import *
-except ImportError:
-    # הגדרות ברירת מחדל אם config.py לא קיים
-    BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-    PORT = int(os.environ.get("PORT", 5000))
-    WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").rstrip('/')
-    TEACHER_PASSWORD = os.environ.get("TEACHER_PASSWORD", "admin123")
-    SECRET_KEY = os.environ.get("SECRET_KEY", "crypto-class-secret-key-2026-change-this")
-    ADMIN_IDS = [224223270]
-
 # הגדרת לוגים
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(os.path.join(LOGS_DIR, 'crypto_class.log') if 'LOGS_DIR' in locals() else 'crypto_class.log')
+        logging.FileHandler('crypto_class.log')
     ]
 )
 logger = logging.getLogger(__name__)
 
+# ========== הגדרות מערכת ==========
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+if not BOT_TOKEN:
+    logger.error("❌ BOT_TOKEN לא מוגדר!")
+    # עבור בדיקות מקומיות
+    BOT_TOKEN = "dummy_token_for_testing"
+    logger.warning("⚠️ משתמש בטוקן דמי לבדיקה מקומית")
+
+PORT = int(os.environ.get("PORT", 5000))
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").rstrip('/')
+TEACHER_PASSWORD = os.environ.get("TEACHER_PASSWORD", "admin123")
+SECRET_KEY = os.environ.get("SECRET_KEY", "crypto-class-secret-key-2026-change-this")
+
 # אתחול הבוט
-if BOT_TOKEN:
-    try:
-        bot = AsyncTeleBot(BOT_TOKEN)
-        logger.info("✅ בוט אותחל")
-    except Exception as e:
-        logger.error(f"❌ שגיאה באתחול הבוט: {e}")
-        bot = None
-else:
-    logger.warning("⚠️ BOT_TOKEN לא הוגדר, בוט לא יופעל")
+try:
+    bot = AsyncTeleBot(BOT_TOKEN)
+    logger.info(f"✅ בוט אותחל")
+except Exception as e:
+    logger.error(f"❌ שגיאה באתחול הבוט: {e}")
+    # יצירת בוט דמי לבדיקה
     bot = None
 
 # ========== יבוא מודולים פנימיים ==========
@@ -60,7 +59,11 @@ try:
         get_top_users, get_system_stats, get_activity_count,
         get_total_referrals, get_referred_users, get_all_users,
         get_user_attendance_history, get_checkin_data,
-        add_tokens_to_user, reset_user_checkin, get_daily_stats
+        add_tokens_to_user, reset_user_checkin, get_daily_stats,
+        get_today_stats, get_streak_stats, get_activity_stats,
+        get_api_stats, search_users, get_available_tasks,
+        complete_task, get_pending_tasks, approve_task, reject_task,
+        get_user_activity_report
     )
     logger.info("✅ מודולי מסד נתונים נטענו")
 except ImportError as e:
@@ -247,11 +250,15 @@ def index():
                 pass
         
         # קבל נתונים נוספים
-        today_stats = get_daily_stats()
+        today_stats = get_today_stats()
+        streak_stats = get_streak_stats()
+        activity_stats = get_activity_stats()
         
         return render_template('index.html', 
                              stats=stats,
                              today_stats=today_stats,
+                             streak_stats=streak_stats,
+                             activity_stats=activity_stats,
                              bot_username=bot_username,
                              now=datetime.now)
     except Exception as e:
@@ -312,7 +319,7 @@ def health_check():
             "timestamp": datetime.now().isoformat(),
             "database": db_status,
             "bot": bot_status,
-            "version": "2.2.0",
+            "version": "2.3.0",
             "environment": os.environ.get("RAILWAY_ENVIRONMENT", "development"),
             "features": {
                 "webhook": bool(WEBHOOK_URL),
@@ -401,6 +408,24 @@ def teacher_users():
         logger.error(f"❌ שגיאה בטעינת משתמשים: {e}")
         return render_template('error.html', error="שגיאה בטעינת משתמשים")
 
+@flask_app.route('/teacher/pending_tasks')
+def teacher_pending_tasks():
+    """משימות ממתינות לאישור"""
+    if not session.get('teacher_logged_in'):
+        return redirect(url_for('teacher_login'))
+    
+    try:
+        pending_tasks = get_pending_tasks()
+        stats = get_system_stats()
+        
+        return render_template('teacher/teacher_pending_tasks.html',
+                             pending_tasks=pending_tasks,
+                             stats=stats,
+                             now=datetime.now)
+    except Exception as e:
+        logger.error(f"❌ שגיאה בטעינת משימות ממתינות: {e}")
+        return render_template('error.html', error="שגיאה בטעינת משימות")
+
 # ========== API פנימי ==========
 @flask_app.route('/api/v1/user/<int:user_id>', methods=['GET'])
 def api_get_user(user_id):
@@ -430,11 +455,8 @@ def api_get_user(user_id):
 def api_get_stats():
     """API לקבלת סטטיסטיקות"""
     try:
-        stats = get_system_stats()
-        return jsonify({
-            "status": "success",
-            "data": stats
-        })
+        stats = get_api_stats()
+        return jsonify(stats)
     except Exception as e:
         logger.error(f"❌ שגיאה ב-API stats: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -451,6 +473,68 @@ def api_get_checkin_data(days):
     except Exception as e:
         logger.error(f"❌ שגיאה ב-API checkin data: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+# ========== API ניהול משימות ==========
+@flask_app.route('/api/v1/tasks/approve/<int:task_id>', methods=['POST'])
+def api_approve_task(task_id):
+    """API לאישור משימה"""
+    if not session.get('teacher_logged_in'):
+        return jsonify({"status": "error", "message": "לא מורשה"}), 401
+    
+    try:
+        admin_id = 224223270  # מזהה אדמין ברירת מחדל
+        success, message = approve_task(task_id, admin_id)
+        
+        if success:
+            return jsonify({"status": "success", "message": message})
+        else:
+            return jsonify({"status": "error", "message": message}), 400
+    except Exception as e:
+        logger.error(f"❌ שגיאה ב-API approve task: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@flask_app.route('/api/v1/tasks/reject/<int:task_id>', methods=['POST'])
+def api_reject_task(task_id):
+    """API לדחיית משימה"""
+    if not session.get('teacher_logged_in'):
+        return jsonify({"status": "error", "message": "לא מורשה"}), 401
+    
+    try:
+        data = request.get_json()
+        reason = data.get('reason', '') if data else ''
+        
+        admin_id = 224223270  # מזהה אדמין ברירת מחדל
+        success, message = reject_task(task_id, admin_id, reason)
+        
+        if success:
+            return jsonify({"status": "success", "message": message})
+        else:
+            return jsonify({"status": "error", "message": message}), 400
+    except Exception as e:
+        logger.error(f"❌ שגיאה ב-API reject task: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# ========== חיפוש משתמשים ==========
+@flask_app.route('/search/users')
+def search_users_page():
+    """חיפוש משתמשים"""
+    if not session.get('teacher_logged_in'):
+        return redirect(url_for('teacher_login'))
+    
+    try:
+        query = request.args.get('q', '')
+        users = []
+        
+        if query:
+            users = search_users(query, limit=20)
+        
+        return render_template('teacher/search_users.html',
+                             users=users,
+                             query=query,
+                             now=datetime.now)
+    except Exception as e:
+        logger.error(f"❌ שגיאה בחיפוש משתמשים: {e}")
+        return render_template('error.html', error="שגיאה בחיפוש משתמשים")
 
 # ========== פונקציות מערכת ==========
 def run_bot_polling():
@@ -499,4 +583,4 @@ if __name__ == '__main__':
     logger.info(f"📊 בריאות מערכת: http://localhost:{PORT}/health")
     logger.info(f"👨‍🏫 דשבורד מורים: http://localhost:{PORT}/teacher/login")
     
-    flask_app.run(host='0.0.0.0', port=PORT, debug=DEBUG, use_reloader=False)
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
