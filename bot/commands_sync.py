@@ -87,7 +87,8 @@ try:
         get_top_users, get_system_stats, get_activity_count,
         get_total_referrals, get_referred_users, add_tokens_to_user,
         get_user_attendance_history, get_available_tasks,
-        get_user_tasks, complete_task
+        get_user_tasks, complete_task, get_user_level_info,
+        calculate_user_streak, get_user_referrals
     )
     DATABASE_AVAILABLE = True
 except ImportError as e:
@@ -635,15 +636,47 @@ async def tasks(message, bot):
         user = message.from_user
         chat_id = message.chat.id
         
-        response = (
-            f"✅ **מערכת המשימות**\n\n"
-            f"📢 **משימות חדשות בקרוב!**\n\n"
-            f"💡 **בינתיים, אתה יכול:**\n"
-            f"• שלח /checkin לצ'ק-אין יומי\n"
-            f"• שלח /referral להזמנת חברים\n"
-            f"• שלח /leaderboard לראות את המובילים\n\n"
-            f"🚀 **משימות יגיעו בגרסה הבאה של המערכת!**"
-        )
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id,
+                "⚠️ **מסד הנתונים לא זמין**\n\nנסה שוב מאוחר יותר.",
+                parse_mode="Markdown")
+            return
+        
+        available_tasks = get_available_tasks(user.id)
+        
+        if not available_tasks:
+            response = (
+                f"✅ **מערכת המשימות**\n\n"
+                f"📭 **אין משימות זמינות כרגע**\n\n"
+                f"💡 **מה תוכל לעשות?**\n"
+                f"• בדוק שוב מחר\n"
+                f"• הזמן חברים עם /referral\n"
+                f"• בצע צ'ק-אין יומי עם /checkin\n\n"
+                f"🚀 **משימות חדשות מתווספות כל הזמן!**"
+            )
+        else:
+            response = (
+                f"✅ **מערכת המשימות - משימות זמינות**\n\n"
+                f"📋 **יש לך {len(available_tasks)} משימות זמינות:**\n\n"
+            )
+            
+            for i, task in enumerate(available_tasks, 1):
+                response += f"{i}. **{task.name}**\n"
+                response += f"   📝 {task.description}\n"
+                response += f"   💰 {task.tokens_reward} טוקנים\n"
+                
+                if task.frequency.value == 'daily':
+                    response += f"   ⏰ יומי\n"
+                elif task.frequency.value == 'weekly':
+                    response += f"   ⏰ שבועי\n"
+                elif task.frequency.value == 'monthly':
+                    response += f"   ⏰ חודשי\n"
+                elif task.frequency.value == 'one_time':
+                    response += f"   ⏰ חד-פעמי\n"
+                
+                response += f"\n"
+        
+        response += f"\nℹ️ **לצפייה במשימות שהושלמו:**\nהשתמש באתר האינטרנט שלנו!"
         
         await safe_reply(bot, chat_id, response, parse_mode="Markdown")
         
