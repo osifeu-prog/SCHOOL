@@ -1,38 +1,25 @@
 #!/usr/bin/env python3
 """
 פקודות בוט סינכרוניות משודרגות
-כל הפקודות עם טיפול שגיאות משופר ואינטגרציה מלאה
+גרסה מלאה ומוכנה להפעלה
 """
 
 import logging
 import random
 import string
-from datetime import datetime
+from datetime import datetime, date, timedelta
 import traceback
-
-# יבוא פונקציות ממסד הנתונים
-from database.queries import (
-    get_user, register_user, checkin_user, get_balance,
-    get_top_users, get_total_referrals, get_system_stats,
-    get_activity_count, get_referred_users, add_tokens_to_user,
-    create_task, get_available_tasks, complete_task,
-    get_user_tasks, get_user_attendance_history
-)
 
 logger = logging.getLogger(__name__)
 
-# ========== פונקציות עזר משופרות ==========
+# ========== פונקציות עזר ==========
 
 def generate_referral_code(user_id: int, length: int = 8) -> str:
-    """יצירת קוד הפניה ייחודי עם בדיקת כפילויות"""
+    """יצירת קוד הפניה ייחודי"""
     try:
-        # בסיס מהמזהה של המשתמש
         base = str(user_id)[-4:] if len(str(user_id)) >= 4 else str(user_id).zfill(4)
-        
-        # הוסף תווים אקראיים
         chars = string.ascii_uppercase + string.digits
         random_part = ''.join(random.choice(chars) for _ in range(length - 4))
-        
         code = f"{base}{random_part}"
         return code[:length]
     except Exception as e:
@@ -40,7 +27,7 @@ def generate_referral_code(user_id: int, length: int = 8) -> str:
         return f"REF{user_id}"
 
 def calculate_level(tokens: int) -> int:
-    """חישוב רמה לפי טוקנים עם נוסחה מתקדמת"""
+    """חישוב רמה לפי טוקנים"""
     if tokens < 10:
         return 1
     elif tokens < 50:
@@ -69,10 +56,9 @@ def calculate_level(tokens: int) -> int:
         return 13
 
 def get_level_progress(tokens: int) -> tuple:
-    """קבלת התקדמות ברמה הנוכחית עם חישוב מדויק"""
+    """קבלת התקדמות ברמה הנוכחית"""
     level = calculate_level(tokens)
     
-    # גבולות רמות דינמיות
     level_thresholds = [0, 10, 50, 100, 200, 500, 1000, 2000, 5000, 
                        10000, 20000, 50000, 100000, 200000]
     
@@ -89,7 +75,34 @@ def get_level_progress(tokens: int) -> tuple:
 
 def format_number(num: int) -> str:
     """פורמט מספר עם פסיקים"""
-    return f"{num:,}"
+    try:
+        return f"{int(num):,}"
+    except:
+        return str(num)
+
+# ========== יבוא פונקציות ממסד הנתונים ==========
+try:
+    from database.queries import (
+        get_user, register_user, checkin_user, get_balance,
+        get_top_users, get_system_stats, get_activity_count,
+        get_total_referrals, get_referred_users, add_tokens_to_user,
+        get_user_attendance_history, get_available_tasks,
+        get_user_tasks, complete_task
+    )
+    DATABASE_AVAILABLE = True
+except ImportError as e:
+    logger.error(f"❌ שגיאה בטעינת מודול מסד נתונים: {e}")
+    DATABASE_AVAILABLE = False
+    
+    # פונקציות דמה למקרה של שגיאה
+    def get_user(*args, **kwargs): 
+        return None
+    def get_balance(*args, **kwargs):
+        return 0
+    def get_top_users(*args, **kwargs):
+        return []
+    def get_system_stats(*args, **kwargs):
+        return {'total_users': 0, 'active_today': 0, 'total_tokens': 0}
 
 # ========== פונקציות טיפול בשגיאות ==========
 
@@ -118,14 +131,21 @@ async def handle_command_error(bot, chat_id, command, error):
     await safe_reply(bot, chat_id, error_msg, parse_mode="Markdown")
     logger.error(f"❌ שגיאה בפקודה {command}: {error}\n{traceback.format_exc()}")
 
-# ========== פקודות בוט משודרגות ==========
+# ========== פקודות בוט ==========
 
 async def start(message, bot):
-    """פקודת התחלה משודרגת"""
+    """פקודת התחלה"""
     try:
         user = message.from_user
         chat_id = message.chat.id
         logger.info(f"🚀 /start ממשתמש {user.id} ({user.first_name})")
+        
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id, 
+                "⚠️ **מסד הנתונים לא זמין**\n\n"
+                "המערכת בעיצומה של עדכון. נסה שוב בעוד מספר דקות.",
+                parse_mode="Markdown")
+            return
         
         # בדיקה אם המשתמש קיים
         db_user = get_user(user.id)
@@ -148,23 +168,10 @@ async def start(message, bot):
                 f"🚀 **התחל עם:** /checkin"
             )
             
-            # הוסף כפתורים מהירים
-            from telebot import types
-            markup = types.InlineKeyboardMarkup()
-            markup.row(
-                types.InlineKeyboardButton("✅ צ'ק-אין", callback_data="checkin"),
-                types.InlineKeyboardButton("💰 טוקנים", callback_data="balance")
-            )
-            markup.row(
-                types.InlineKeyboardButton("🏆 מובילים", callback_data="leaderboard"),
-                types.InlineKeyboardButton("👥 הפניות", callback_data="referrals")
-            )
-            
-            await safe_reply(bot, chat_id, welcome_msg, parse_mode="Markdown", reply_markup=markup)
+            await safe_reply(bot, chat_id, welcome_msg, parse_mode="Markdown")
             
         else:
             # משתמש חדש
-            # בדוק אם יש קוד הפניה
             referral_code = None
             if len(message.text.split()) > 1:
                 referral_code = message.text.split()[1]
@@ -179,7 +186,6 @@ async def start(message, bot):
             )
             
             if success:
-                # קבל את המשתמש שנרשם
                 new_user = get_user(user.id)
                 
                 welcome_msg = (
@@ -188,7 +194,7 @@ async def start(message, bot):
                     f"👤 **שם:** {user.first_name}\n"
                     f"🆔 **מזהה:** {user.id}\n"
                     f"📅 **תאריך:** {datetime.now().strftime('%d/%m/%Y')}\n"
-                    f"🔗 **קוד הפניה:** `{new_user.referral_code}`\n\n"
+                    f"🔗 **קוד הפניה:** `{new_user.referral_code if new_user else 'לא זמין'}`\n\n"
                     f"🎁 **קבלת מתנה:** **10 טוקנים**!\n\n"
                     f"📚 **מה זה Crypto-Class?**\n"
                     f"זו מערכת למידה מבוססת טוקנים.\n"
@@ -198,59 +204,38 @@ async def start(message, bot):
                     f"🚀 **התחל עכשיו עם:** /checkin"
                 )
                 
-                # הוסף טוקנים מתנה
-                add_tokens_to_user(user.id, 10)
-                
-                # כפתורים מהירים
-                from telebot import types
-                markup = types.InlineKeyboardMarkup()
-                markup.row(
-                    types.InlineKeyboardButton("🎁 קח את הטוקנים!", callback_data="get_tokens"),
-                    types.InlineKeyboardButton("📚 למד עוד", callback_data="learn_more")
-                )
-                
-                await safe_reply(bot, chat_id, welcome_msg, parse_mode="Markdown", reply_markup=markup)
-                
-                # הודעה פרטית נוספת
-                guide_msg = (
-                    f"📖 **מדריך מהיר:**\n\n"
-                    f"1. **צ'ק-אין יומי** - שלח /checkin כל יום\n"
-                    f"2. **הזמן חברים** - שלח /referral\n"
-                    f"3. **בצע משימות** - שלח /tasks\n"
-                    f"4. **עקוב אחריי** - שלח /profile\n\n"
-                    f"📊 **סטטיסטיקות ראשונות:**\n"
-                    f"• הטוקנים שלך: **10**\n"
-                    f"• הרמה שלך: **1**\n\n"
-                    f"🚀 קדימה, התחל לצבור!"
-                )
-                
-                await safe_reply(bot, chat_id, guide_msg, parse_mode="Markdown")
+                await safe_reply(bot, chat_id, welcome_msg, parse_mode="Markdown")
                 
             else:
-                error_msg = "❌ **אירעה שגיאה ברישום**\n\nנסה שוב או פנה לתמיכה: /contact"
-                await safe_reply(bot, chat_id, error_msg, parse_mode="Markdown")
+                await safe_reply(bot, chat_id, 
+                    "❌ **אירעה שגיאה ברישום**\n\nנסה שוב או פנה לתמיכה: /contact",
+                    parse_mode="Markdown")
                 
     except Exception as e:
         await handle_command_error(bot, message.chat.id, "/start", e)
 
 async def checkin(message, bot):
-    """צ'ק-אין יומי משודרג"""
+    """צ'ק-אין יומי"""
     try:
         user = message.from_user
         chat_id = message.chat.id
         
         logger.info(f"📅 /checkin ממשתמש {user.id}")
         
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id,
+                "⚠️ **מסד הנתונים לא זמין**\n\nנסה שוב מאוחר יותר.",
+                parse_mode="Markdown")
+            return
+        
         # בצע צ'ק-אין
         success, msg = checkin_user(user.id)
         
         if success:
-            # קבל נתונים מעודכנים
             balance = get_balance(user.id)
             stats = get_system_stats()
             level, progress, total, next_level = get_level_progress(balance)
             
-            # הודעה מפורטת
             response = (
                 f"✅ **{msg}**\n\n"
                 f"💰 **יתרה מעודכנת:** {format_number(balance)} טוקנים\n"
@@ -259,36 +244,21 @@ async def checkin(message, bot):
                 f"🎯 **לרמה הבאה חסרים:** {format_number(next_level - balance)} טוקנים\n\n"
                 f"📈 **סטטיסטיקות מערכת:**\n"
                 f"• 👥 משתמשים: {format_number(stats.get('total_users', 0))}\n"
-                f"• 📅 פעילים היום: {format_number(stats.get('active_today', 0))}\n"
-                f"• 💰 טוקנים כוללים: {format_number(stats.get('total_tokens', 0))}\n\n"
+                f"• 📅 פעילים היום: {format_number(stats.get('active_today', 0))}\n\n"
                 f"💪 **המשך להתמיד!**\n"
                 f"הצ'ק-אין הבא בעוד 24 שעות."
             )
             
-            # כפתורים
-            from telebot import types
-            markup = types.InlineKeyboardMarkup()
-            markup.row(
-                types.InlineKeyboardButton("💰 יתרה", callback_data="balance"),
-                types.InlineKeyboardButton("🏆 רמה", callback_data="level")
-            )
-            markup.row(
-                types.InlineKeyboardButton("👥 הזמן חבר", callback_data="invite"),
-                types.InlineKeyboardButton("📊 סטטיסטיקות", callback_data="stats")
-            )
-            
-            await safe_reply(bot, chat_id, response, parse_mode="Markdown", reply_markup=markup)
+            await safe_reply(bot, chat_id, response, parse_mode="Markdown")
             
         else:
-            # בדוק מתי אפשר שוב
             user_data = get_user(user.id)
             if user_data and user_data.last_checkin:
-                last_checkin = user_data.last_checkin
-                if hasattr(last_checkin, 'strftime'):
-                    last_date = last_checkin.strftime('%d/%m/%Y %H:%M')
+                last_date = user_data.last_checkin
+                if isinstance(last_date, date):
                     response = (
                         f"⏳ **כבר ביצעת צ'ק-אין היום!**\n\n"
-                        f"🕒 **צ'ק-אין אחרון:** {last_date}\n"
+                        f"🕒 **צ'ק-אין אחרון:** {last_date.strftime('%d/%m/%Y %H:%M')}\n"
                         f"⏰ **צ'ק-אין הבא:** מחר בשעה זו\n\n"
                         f"📊 **הטוקנים שלך:** {format_number(user_data.tokens)}\n"
                         f"🏆 **הרמה שלך:** {user_data.level}\n\n"
@@ -305,16 +275,27 @@ async def checkin(message, bot):
         await handle_command_error(bot, message.chat.id, "/checkin", e)
 
 async def balance(message, bot):
-    """יתרת טוקנים מפורטת"""
+    """יתרת טוקנים"""
     try:
         user = message.from_user
         chat_id = message.chat.id
+        
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id,
+                "⚠️ **מסד הנתונים לא זמין**\n\nנסה שוב מאוחר יותר.",
+                parse_mode="Markdown")
+            return
         
         balance_amount = get_balance(user.id)
         level, progress, total, next_level = get_level_progress(balance_amount)
         
         # היסטוריית צ'ק-אין
-        attendance_history = get_user_attendance_history(user.id, 7)
+        attendance_history = []
+        try:
+            attendance_history = get_user_attendance_history(user.id, 7)
+        except:
+            pass
+        
         streak = len(attendance_history)
         
         response = (
@@ -345,7 +326,7 @@ async def balance(message, bot):
         filled = int((progress / total) * progress_bar_length) if total > 0 else 0
         progress_bar = "▓" * filled + "░" * (progress_bar_length - filled)
         
-        response += f"\n\n📈 **מתקדם לרמה {level+1}:**\n`{progress_bar}` {int((progress/total)*100)}%"
+        response += f"\n\n📈 **מתקדם לרמה {level+1}:**\n`{progress_bar}` {int((progress/total)*100) if total > 0 else 0}%"
         
         await safe_reply(bot, chat_id, response, parse_mode="Markdown")
         
@@ -353,10 +334,16 @@ async def balance(message, bot):
         await handle_command_error(bot, message.chat.id, "/balance", e)
 
 async def referral(message, bot):
-    """מערכת הפניות משודרגת"""
+    """מערכת הפניות"""
     try:
         user = message.from_user
         chat_id = message.chat.id
+        
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id,
+                "⚠️ **מסד הנתונים לא זמין**\n\nנסה שוב מאוחר יותר.",
+                parse_mode="Markdown")
+            return
         
         db_user = get_user(user.id)
         if not db_user:
@@ -403,15 +390,7 @@ async def referral(message, bot):
         
         response += f"\n📱 **לצפייה במוזמנים המלאים:** /my_referrals"
         
-        # כפתורים מהירים
-        from telebot import types
-        markup = types.InlineKeyboardMarkup()
-        markup.row(
-            types.InlineKeyboardButton("📤 שתף קישור", url=f"https://t.me/share/url?url={invite_link}&text=הצטרף%20לCrypto-Class!"),
-            types.InlineKeyboardButton("👥 מוזמנים", callback_data="my_referrals")
-        )
-        
-        await safe_reply(bot, chat_id, response, parse_mode="Markdown", reply_markup=markup)
+        await safe_reply(bot, chat_id, response, parse_mode="Markdown")
         
     except Exception as e:
         await handle_command_error(bot, message.chat.id, "/referral", e)
@@ -421,6 +400,12 @@ async def my_referrals(message, bot):
     try:
         user = message.from_user
         chat_id = message.chat.id
+        
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id,
+                "⚠️ **מסד הנתונים לא זמין**\n\nנסה שוב מאוחר יותר.",
+                parse_mode="Markdown")
+            return
         
         referred_users = get_referred_users(user.id)
         total_refs = get_total_referrals(user.id)
@@ -455,15 +440,18 @@ async def my_referrals(message, bot):
         await handle_command_error(bot, message.chat.id, "/my_referrals", e)
 
 async def leaderboard(message, bot):
-    """טבלת מובילים משודרגת"""
+    """טבלת מובילים"""
     try:
         user = message.from_user
         chat_id = message.chat.id
         
-        # קבל מובילים לפי קטגוריות
-        top_tokens = get_top_users(10, 'tokens')
-        top_referrals = get_top_users(10, 'referrals')
-        top_level = get_top_users(10, 'level')
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id,
+                "⚠️ **מסד הנתונים לא זמין**\n\nנסה שוב מאוחר יותר.",
+                parse_mode="Markdown")
+            return
+        
+        top_users = get_top_users(10, 'tokens')
         
         # מצא את המיקום של המשתמש
         all_users = get_top_users(100, 'tokens')
@@ -479,52 +467,38 @@ async def leaderboard(message, bot):
         )
         
         # הוסף 5 מובילים ראשונים
-        for i, top_user in enumerate(top_tokens[:5], 1):
+        for i, top_user in enumerate(top_users[:5], 1):
             name = top_user.first_name or top_user.username or f"משתמש {top_user.telegram_id}"
             if top_user.telegram_id == user.id:
                 response += f"{i}. 👑 **{name}** - {format_number(top_user.tokens)} טוקנים\n"
             else:
                 response += f"{i}. {name} - {format_number(top_user.tokens)} טוקנים\n"
         
-        response += f"\n👥 **מובילים בהפניות:**\n"
-        for i, top_user in enumerate(top_referrals[:3], 1):
-            name = top_user.first_name or top_user.username or f"משתמש {top_user.telegram_id}"
-            response += f"{i}. {name} - {top_user.total_referrals} מוזמנים\n"
-        
-        response += f"\n🎯 **מובילים ברמה:**\n"
-        for i, top_user in enumerate(top_level[:3], 1):
-            name = top_user.first_name or top_user.username or f"משתמש {top_user.telegram_id}"
-            response += f"{i}. {name} - רמה {top_user.level}\n"
+        response += f"\n⏰ **עדכון אחרון:** {datetime.now().strftime('%H:%M')}"
         
         # הוסף את מיקום המשתמש
         if user_position:
             user_balance = get_balance(user.id)
-            response += f"\n📊 **המיקום שלך:** #{user_position} עם {format_number(user_balance)} טוקנים\n"
+            response += f"\n\n📊 **המיקום שלך:** #{user_position} עם {format_number(user_balance)} טוקנים\n"
         
-        response += f"\n⏰ **עדכון אחרון:** {datetime.now().strftime('%H:%M')}"
+        response += f"\n📈 **לצפייה בטבלה המלאה:**\nהשתמש באתר האינטרנט שלנו!"
         
-        # כפתורים לקטגוריות שונות
-        from telebot import types
-        markup = types.InlineKeyboardMarkup()
-        markup.row(
-            types.InlineKeyboardButton("💰 טוקנים", callback_data="top_tokens"),
-            types.InlineKeyboardButton("👥 הפניות", callback_data="top_refs")
-        )
-        markup.row(
-            types.InlineKeyboardButton("🎯 רמה", callback_data="top_level"),
-            types.InlineKeyboardButton("📈 פרופיל שלי", callback_data="my_profile")
-        )
-        
-        await safe_reply(bot, chat_id, response, parse_mode="Markdown", reply_markup=markup)
+        await safe_reply(bot, chat_id, response, parse_mode="Markdown")
         
     except Exception as e:
         await handle_command_error(bot, message.chat.id, "/leaderboard", e)
 
 async def level(message, bot):
-    """מידע רמה מפורט"""
+    """מידע רמה"""
     try:
         user = message.from_user
         chat_id = message.chat.id
+        
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id,
+                "⚠️ **מסד הנתונים לא זמין**\n\nנסה שוב מאוחר יותר.",
+                parse_mode="Markdown")
+            return
         
         balance = get_balance(user.id)
         level_num, progress, total, next_level = get_level_progress(balance)
@@ -587,10 +561,16 @@ async def level(message, bot):
         await handle_command_error(bot, message.chat.id, "/level", e)
 
 async def profile(message, bot):
-    """פרופיל משתמש מלא"""
+    """פרופיל משתמש"""
     try:
         user = message.from_user
         chat_id = message.chat.id
+        
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id,
+                "⚠️ **מסד הנתונים לא זמין**\n\nנסה שוב מאוחר יותר.",
+                parse_mode="Markdown")
+            return
         
         db_user = get_user(user.id)
         if not db_user:
@@ -600,8 +580,14 @@ async def profile(message, bot):
         balance = db_user.tokens
         level_num, progress, total, next_level = get_level_progress(balance)
         total_refs = get_total_referrals(user.id)
-        attendance_history = get_user_attendance_history(user.id, 30)
-        streak = len([a for a in attendance_history if a.date == datetime.now().date()])
+        
+        attendance_history = []
+        try:
+            attendance_history = get_user_attendance_history(user.id, 30)
+        except:
+            pass
+        
+        streak = len([a for a in attendance_history if isinstance(a.date, date) and a.date == date.today()])
         
         response = (
             f"👤 **פרופיל משתמש - {user.first_name}**\n\n"
@@ -620,115 +606,52 @@ async def profile(message, bot):
         if total_refs >= 5:
             response += "• 👥 מגייס מצטיין (5+)\n"
         if streak >= 7:
-            response += "
-                    if streak >= 30:
-            response += "• 🔥 מלך הרצף (30+ ימים)\n"
+            response += "• 🔥 מלך הרצף (7+ ימים)\n"
         if level_num >= 5:
             response += "• ⭐ כוכב עולה (רמה 5+)\n"
         if level_num >= 10:
             response += "• 👑 אלוף העל (רמה 10+)\n"
         
+        if not (balance >= 100 or total_refs >= 5 or streak >= 7 or level_num >= 5):
+            response += "• 🎯 התחל לצבור הישגים!\n"
+        
         response += f"\n📈 **התקדמות החודש:**\n"
         response += f"• 📅 צ'ק-אין: {len(attendance_history)} ימים\n"
-        response += f"• 💰 טוקנים שנוספו: {balance - (db_user.tokens or 0)} (מאז תחילת החודש)\n"
-        response += f"• 🎯 משימות שהתחלת: 0 (השתמש ב-/tasks)\n\n"
+        response += f"• 💰 טוקנים שנוספו: {balance - (db_user.tokens or 0)}\n\n"
         
         response += f"🚀 **יעדים להמשך:**\n"
         response += f"• להגיע לרמה {level_num + 1} (חסרים {next_level - balance} טוקנים)\n"
         response += f"• להזמין {5 - total_refs if total_refs < 5 else 0} חברים נוספים\n"
-        response += f"• לשמור על רצף של {30 - streak if streak < 30 else 0} ימים נוספים\n"
+        response += f"• לשמור על רצף של {7 - streak if streak < 7 else 0} ימים נוספים\n"
         
-        # כפתורים לפעולות
-        from telebot import types
-        markup = types.InlineKeyboardMarkup()
-        markup.row(
-            types.InlineKeyboardButton("💰 טוקנים", callback_data="balance"),
-            types.InlineKeyboardButton("🏆 רמה", callback_data="level")
-        )
-        markup.row(
-            types.InlineKeyboardButton("👥 הפניות", callback_data="referrals"),
-            types.InlineKeyboardButton("📊 סטטיסטיקות", callback_data="stats")
-        )
-        
-        await safe_reply(bot, chat_id, response, parse_mode="Markdown", reply_markup=markup)
+        await safe_reply(bot, chat_id, response, parse_mode="Markdown")
         
     except Exception as e:
         await handle_command_error(bot, message.chat.id, "/profile", e)
 
 async def tasks(message, bot):
-    """מערכת משימות משודרגת"""
+    """מערכת משימות"""
     try:
         user = message.from_user
         chat_id = message.chat.id
         
-        available_tasks = get_available_tasks(user.id)
-        user_tasks = get_user_tasks(user.id)
-        
-        if not available_tasks:
-            response = (
-                f"✅ **מערכת המשימות**\n\n"
-                f"📭 אין משימות זמינות כרגע.\n\n"
-                f"📢 **משימות חדשות יתווספו בקרוב!**\n\n"
-                f"💡 **בינתיים, אתה יכול:**\n"
-                f"• שלח /checkin לצ'ק-אין יומי\n"
-                f"• שלח /referral להזמנת חברים\n"
-                f"• שלח /leaderboard לראות את המובילים"
-            )
-        else:
-            response = (
-                f"✅ **משימות זמינות - {user.first_name}**\n\n"
-                f"📋 **סה\"כ משימות:** {len(available_tasks)}\n"
-                f"🎯 **הושלמו:** {len([t for t in user_tasks if t.status == 'completed'])}\n\n"
-                f"📝 **רשימת משימות:**\n"
-            )
-            
-            for i, task in enumerate(available_tasks[:5], 1):
-                status = "🔒"
-                for user_task in user_tasks:
-                    if user_task.task_id == task.id:
-                        if user_task.status == 'completed':
-                            status = "✅"
-                        else:
-                            status = "⏳"
-                        break
-                
-                response += f"{i}. {status} **{task.name}** - {task.tokens_reward} טוקנים\n"
-                if task.description:
-                    response += f"   📝 {task.description[:50]}...\n"
-            
-            if len(available_tasks) > 5:
-                response += f"\n... ועוד {len(available_tasks) - 5} משימות\n"
-            
-            response += f"\n🎁 **בונוסים מיוחדים:**\n"
-            response += "• השלם 3 משימות - קבל 10 טוקנים בונוס!\n"
-            response += "• השלם 10 משימות - עלה רמה חינם!\n"
-            response += "• השלם את כל המשימות - תואר 'משימות על'!\n"
-            
-            response += f"\n🚀 **להתחלת משימה:**\n"
-            response += "השתמש ב-/task <מספר משימה>\n"
-            response += "לדוגמה: /task 1"
-        
-        # כפתורים למשימות
-        from telebot import types
-        markup = types.InlineKeyboardMarkup()
-        if available_tasks:
-            buttons = []
-            for i in range(min(3, len(available_tasks))):
-                buttons.append(types.InlineKeyboardButton(f"משימה {i+1}", callback_data=f"task_{i+1}"))
-            markup.row(*buttons)
-        
-        markup.row(
-            types.InlineKeyboardButton("📋 משימות שלי", callback_data="my_tasks"),
-            types.InlineKeyboardButton("🎯 התחל משימה", callback_data="start_task")
+        response = (
+            f"✅ **מערכת המשימות**\n\n"
+            f"📢 **משימות חדשות בקרוב!**\n\n"
+            f"💡 **בינתיים, אתה יכול:**\n"
+            f"• שלח /checkin לצ'ק-אין יומי\n"
+            f"• שלח /referral להזמנת חברים\n"
+            f"• שלח /leaderboard לראות את המובילים\n\n"
+            f"🚀 **משימות יגיעו בגרסה הבאה של המערכת!**"
         )
         
-        await safe_reply(bot, chat_id, response, parse_mode="Markdown", reply_markup=markup)
+        await safe_reply(bot, chat_id, response, parse_mode="Markdown")
         
     except Exception as e:
         await handle_command_error(bot, message.chat.id, "/tasks", e)
 
 async def contact(message, bot):
-    """צור קשר משופר"""
+    """צור קשר"""
     try:
         user = message.from_user
         chat_id = message.chat.id
@@ -738,7 +661,6 @@ async def contact(message, bot):
             f"👤 **מנהל המערכת:** אוסיף אונגר\n"
             f"💼 **תפקיד:** מנהל פרויקט ומפתח ראשי\n\n"
             f"📱 **דרכי התקשרות:**\n"
-            f"• ✉️ אימייל: osifeu@example.com\n"
             f"• 📞 טלפון: 058-420-3384\n"
             f"• 📨 טלגרם: @osifeu\n\n"
             f"🕒 **זמינות:**\n"
@@ -753,13 +675,7 @@ async def contact(message, bot):
             f"• 📊 שאלות על המערכת\n\n"
             f"⏱️ **זמני תגובה:**\n"
             f"• דחוף: 2-4 שעות\n"
-            f"• רגיל: 24-48 שעות\n"
-            f"• לא דחוף: עד 7 ימים\n\n"
-            f"💬 **טיפים לפני פניה:**\n"
-            f"1. ציין את מזהה הטלגרם שלך\n"
-            f"2. תאר את הבעיה בפירוט\n"
-            f"3. צרף צילומי מסך אם יש\n"
-            f"4. ספר מה ניסית לעשות\n\n"
+            f"• רגיל: 24-48 שעות\n\n"
             f"🙏 **תודה שאתה חלק מהקהילה שלנו!**"
         )
         
@@ -769,7 +685,7 @@ async def contact(message, bot):
         await handle_command_error(bot, message.chat.id, "/contact", e)
 
 async def help_command(message, bot):
-    """עזרה משודרגת עם קטגוריות"""
+    """עזרה"""
     try:
         user = message.from_user
         chat_id = message.chat.id
@@ -787,9 +703,6 @@ async def help_command(message, bot):
             f"👥 **הפניות וחברים:**\n"
             f"• /referral - קוד ההפניה שלך\n"
             f"• /my_referrals - המוזמנים שלך\n\n"
-            f"✅ **משימות ואתגרים:**\n"
-            f"• /tasks - משימות זמינות\n"
-            f"• /mytasks - המשימות שלך\n\n"
             f"🏆 **תחרות ודירוג:**\n"
             f"• /leaderboard - טבלת המובילים\n"
             f"• /stats - סטטיסטיקות אישיות\n\n"
@@ -797,19 +710,14 @@ async def help_command(message, bot):
             f"• /contact - צור קשר עם מנהל\n"
             f"• /help - תפריט זה\n"
             f"• /website - קישור לאתר\n\n"
-            f"👑 **פקודות מורים ומנהלים:**\n"
-            f"• /admin - פאנל ניהול (למנהלים בלבד)\n"
-            f"• /add_tokens - הוספת טוקנים (מנהלים)\n\n"
             f"📖 **מדריך מהיר למתחילים:**\n"
             f"1. שלח /start כדי להירשם\n"
             f"2. שלח /checkin כל יום\n"
             f"3. הזמן חברים עם /referral\n"
-            f"4. בצע משימות עם /tasks\n"
-            f"5. עקוב אחר ההתקדמות עם /profile\n\n"
+            f"4. עקוב אחר ההתקדמות עם /profile\n\n"
             f"💡 **טיפים ושיטות עבודה:**\n"
             f"• בצע צ'ק-אין כל יום באותה שעה\n"
             f"• הזמן לפחות 3 חברים לפתוח\n"
-            f"• בצע את כל המשימות הזמינות\n"
             f"• עקוב אחר הטבלה עם /leaderboard\n\n"
             f"❓ **בעיות נפוצות:**\n"
             f"• לא מצליח להירשם? שלח /start שוב\n"
@@ -818,29 +726,13 @@ async def help_command(message, bot):
             f"📞 **צריך עוד עזרה?** שלח /contact"
         )
         
-        # כפתורים לפי קטגוריות
-        from telebot import types
-        markup = types.InlineKeyboardMarkup()
-        markup.row(
-            types.InlineKeyboardButton("💰 טוקנים", callback_data="help_tokens"),
-            types.InlineKeyboardButton("👥 הפניות", callback_data="help_referrals")
-        )
-        markup.row(
-            types.InlineKeyboardButton("✅ משימות", callback_data="help_tasks"),
-            types.InlineKeyboardButton("🏆 תחרות", callback_data="help_competition")
-        )
-        markup.row(
-            types.InlineKeyboardButton("📞 תמיכה", callback_data="help_support"),
-            types.InlineKeyboardButton("🌐 אתר", callback_data="help_website")
-        )
-        
-        await safe_reply(bot, chat_id, response, parse_mode="Markdown", reply_markup=markup)
+        await safe_reply(bot, chat_id, response, parse_mode="Markdown")
         
     except Exception as e:
         await handle_command_error(bot, message.chat.id, "/help", e)
 
 async def website(message, bot):
-    """אתר אינטרנט עם תכונות נוספות"""
+    """אתר אינטרנט"""
     try:
         user = message.from_user
         chat_id = message.chat.id
@@ -855,23 +747,16 @@ async def website(message, bot):
             f"• 🏆 **טבלאות מובילים** - עם גרפים ודירוגים\n"
             f"• 👨‍🏫 **דשבורד מורים** - ניהול כיתה מתקדם\n"
             f"• 📈 **אנליטיקס** - ניתוח נתונים מתקדם\n"
-            f"• 🔔 **התראות** - עדכונים והודעות\n"
-            f"• 📚 **מדריכים** - הדרכות מפורטות\n"
-            f"• 💬 **פורום** - קהילה ותמיכה\n\n"
+            f"• 🔔 **התראות** - עדכונים והודעות\n\n"
             f"💻 **יתרונות האתר:**\n"
             f"• נוח יותר לשימוש ממסך גדול\n"
             f"• אפשרויות מתקדמות שלא קיימות בבוט\n"
             f"• גרפים וויזואליזציה של נתונים\n"
-            f"• גישה מהירה לכל הפיצ'רים\n"
-            f"• תמיכה טכנית נרחבת\n\n"
+            f"• גישה מהירה לכל הפיצ'רים\n\n"
             f"📱 **איך להשתמש:**\n"
             f"1. היכנס לקישור למעלה\n"
             f"2. התחבר עם חשבון הטלגרם שלך\n"
             f"3. גלה את כל התכונות החדשות!\n\n"
-            f"🔐 **אבטחה:**\n"
-            f"• האתר מאובטח ב-HTTPS\n"
-            f"• לא נדרשת הרשמה נוספת\n"
-            f"• הנתונים שלך מוגנים\n\n"
             f"🚀 **המלצות שלנו:**\n"
             f"• השתמש באתר לניהול ארוך טווח\n"
             f"• השתמש בבוט לפעולות מהירות\n"
@@ -879,140 +764,170 @@ async def website(message, bot):
             f"📞 **בעיות באתר?** שלח /contact"
         )
         
-        # כפתורים לאתר
-        from telebot import types
-        markup = types.InlineKeyboardMarkup()
-        markup.row(
-            types.InlineKeyboardButton("🌐 פתח אתר", url=web_url),
-            types.InlineKeyboardButton("📊 דשבורד", url=f"{web_url}/dashboard")
-        )
-        markup.row(
-            types.InlineKeyboardButton("🏆 טבלה", url=f"{web_url}/leaderboard"),
-            types.InlineKeyboardButton("👨‍🏫 מורים", url=f"{web_url}/teacher")
-        )
-        
-        await safe_reply(bot, chat_id, response, parse_mode="Markdown", reply_markup=markup)
+        await safe_reply(bot, chat_id, response, parse_mode="Markdown")
         
     except Exception as e:
         await handle_command_error(bot, message.chat.id, "/website", e)
 
-# ========== פונקציות callback ==========
-
-async def handle_callback_query(callback_query, bot):
-    """טיפול בכפתורים ובאינטראקציות"""
-    try:
-        user = callback_query.from_user
-        chat_id = callback_query.message.chat.id
-        data = callback_query.data
-        
-        logger.info(f"🔘 Callback from {user.id}: {data}")
-        
-        if data == "checkin":
-            # יצירת הודעה חדשה לבדיקה
-            message = type('obj', (object,), {
-                'from_user': user,
-                'chat': type('chat', (object,), {'id': chat_id})(),
-                'text': '/checkin'
-            })()
-            await checkin(message, bot)
-            
-        elif data == "balance":
-            message = type('obj', (object,), {
-                'from_user': user,
-                'chat': type('chat', (object,), {'id': chat_id})(),
-                'text': '/balance'
-            })()
-            await balance(message, bot)
-            
-        elif data == "referrals":
-            message = type('obj', (object,), {
-                'from_user': user,
-                'chat': type('chat', (object,), {'id': chat_id})(),
-                'text': '/my_referrals'
-            })()
-            await my_referrals(message, bot)
-            
-        elif data == "leaderboard":
-            message = type('obj', (object,), {
-                'from_user': user,
-                'chat': type('chat', (object,), {'id': chat_id})(),
-                'text': '/leaderboard'
-            })()
-            await leaderboard(message, bot)
-            
-        elif data == "level":
-            message = type('obj', (object,), {
-                'from_user': user,
-                'chat': type('chat', (object,), {'id': chat_id})(),
-                'text': '/level'
-            })()
-            await level(message, bot)
-            
-        elif data == "my_profile":
-            message = type('obj', (object,), {
-                'from_user': user,
-                'chat': type('chat', (object,), {'id': chat_id})(),
-                'text': '/profile'
-            })()
-            await profile(message, bot)
-            
-        elif data == "get_tokens":
-            # הוסף טוקנים למשתמש
-            add_tokens_to_user(user.id, 5)
-            await bot.answer_callback_query(
-                callback_query.id,
-                "🎉 קיבלת 5 טוקנים נוספים!",
-                show_alert=True
-            )
-            
-        elif data == "learn_more":
-            await bot.answer_callback_query(
-                callback_query.id,
-                "📚 בדף העזרה תמצא את כל המידע: /help",
-                show_alert=False
-            )
-            
-        else:
-            await bot.answer_callback_query(
-                callback_query.id,
-                "⚙️ תכונה זו בפיתוח",
-                show_alert=False
-            )
-            
-    except Exception as e:
-        logger.error(f"❌ שגיאה ב-callback: {e}")
-        try:
-            await bot.answer_callback_query(
-                callback_query.id,
-                "❌ אירעה שגיאה",
-                show_alert=False
-            )
-        except:
-            pass
-
-# ========== פקודות מנהלים ==========
-
 async def admin_panel(message, bot):
-    """פאנל ניהול - מורחב ומשופר"""
+    """פאנל ניהול"""
     try:
-        from bot.admin_commands import admin_panel as admin_panel_func
-        await admin_panel_func(message, bot)
+        user = message.from_user
+        chat_id = message.chat.id
+        
+        # רשימת אדמינים (ניתן להגדיר ב-env)
+        ADMIN_IDS = [224223270]
+        
+        if user.id not in ADMIN_IDS:
+            await safe_reply(bot, chat_id,
+                "❌ **אין לך הרשאות ניהול!**\n\n"
+                "רק מנהלי המערכת יכולים להשתמש בפקודה זו.",
+                parse_mode="Markdown")
+            return
+        
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id,
+                "⚠️ **מסד הנתונים לא זמין**\n\nנסה שוב מאוחר יותר.",
+                parse_mode="Markdown")
+            return
+        
+        stats = get_system_stats()
+        
+        response = (
+            "👑 **פאנל ניהול - Crypto-Class**\n\n"
+            "📊 **סטטיסטיקות מערכת:**\n"
+            f"• 👥 משתמשים: {stats.get('total_users', 0):,}\n"
+            f"• 📅 פעילים היום: {stats.get('active_today', 0):,}\n"
+            f"• 💰 טוקנים כוללים: {stats.get('total_tokens', 0):,}\n\n"
+            "⚙️ **פקודות ניהול:**\n"
+            "• `/admin_stats` - סטטיסטיקות מפורטות\n"
+            "• `/add_tokens <user_id> <amount>` - הוספת טוקנים\n"
+            "• `/reset_checkin <user_id>` - איפוס צ'ק-אין\n\n"
+            "🌐 **דשבורד אתר:**\n"
+            "• אתר: https://school-production-4d9d.up.railway.app\n"
+            "• דשבורד מורה: /teacher\n"
+            "• סטטיסטיקות: /stats\n\n"
+            f"🆔 **מזהה האדמין שלך:** {user.id}"
+        )
+        
+        await safe_reply(bot, chat_id, response, parse_mode="Markdown")
+        
     except Exception as e:
         await handle_command_error(bot, message.chat.id, "/admin", e)
 
 async def add_tokens(message, bot):
-    """הוספת טוקנים - למנהלים"""
+    """הוספת טוקנים למשתמש"""
     try:
-        from bot.admin_commands import add_tokens as add_tokens_func
-        await add_tokens_func(message, bot)
+        user = message.from_user
+        chat_id = message.chat.id
+        
+        # רשימת אדמינים
+        ADMIN_IDS = [224223270]
+        
+        if user.id not in ADMIN_IDS:
+            await safe_reply(bot, chat_id, "❌ אין לך הרשאות ניהול.")
+            return
+        
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id,
+                "⚠️ **מסד הנתונים לא זמין**\n\nנסה שוב מאוחר יותר.",
+                parse_mode="Markdown")
+            return
+        
+        # בדוק את הפרמטרים
+        args = message.text.split()
+        if len(args) != 3:
+            await safe_reply(bot, chat_id,
+                "💰 **הוספת טוקנים למשתמש**\n\n"
+                "שימוש: `/add_tokens <user_id> <amount>`\n\n"
+                "דוגמה: `/add_tokens 123456789 100`",
+                parse_mode="Markdown")
+            return
+        
+        try:
+            target_user_id = int(args[1])
+            amount = int(args[2])
+        except ValueError:
+            await safe_reply(bot, chat_id, "❌ מזהה משתמש או כמות לא חוקיים.")
+            return
+        
+        # הוסף טוקנים
+        success, new_balance, msg = add_tokens_to_user(target_user_id, amount)
+        
+        if success:
+            target_user = get_user(target_user_id)
+            user_name = target_user.first_name if target_user else f"משתמש {target_user_id}"
+            
+            response = (
+                f"✅ **טוקנים נוספו בהצלחה!**\n\n"
+                f"👤 **משתמש:** {user_name}\n"
+                f"🆔 **מזהה:** {target_user_id}\n"
+                f"➕ **נוספו:** {amount:,} טוקנים\n"
+                f"💰 **יתרה חדשה:** {new_balance:,} טוקנים"
+            )
+            await safe_reply(bot, chat_id, response, parse_mode="Markdown")
+        else:
+            await safe_reply(bot, chat_id,
+                "❌ לא ניתן להוסיף טוקנים למשתמש זה.\n"
+                "ייתכן שהמשתמש לא קיים.")
+        
     except Exception as e:
         await handle_command_error(bot, message.chat.id, "/add_tokens", e)
 
 async def reset_checkin(message, bot):
-    """איפוס צ'ק-אין - למנהלים"""
+    """איפוס צ'ק-אין למשתמש"""
     try:
-        from bot.admin_commands import reset_checkin as reset_checkin_func
-        await reset_checkin_func(message, bot)
+        user = message.from_user
+        chat_id = message.chat.id
+        
+        # רשימת אדמינים
+        ADMIN_IDS = [224223270]
+        
+        if user.id not in ADMIN_IDS:
+            await safe_reply(bot, chat_id, "❌ אין לך הרשאות ניהול.")
+            return
+        
+        if not DATABASE_AVAILABLE:
+            await safe_reply(bot, chat_id,
+                "⚠️ **מסד הנתונים לא זמין**\n\nנסה שוב מאוחר יותר.",
+                parse_mode="Markdown")
+            return
+        
+        # בדוק את הפרמטרים
+        args = message.text.split()
+        if len(args) != 2:
+            await safe_reply(bot, chat_id,
+                "🔄 **איפוס צ'ק-אין למשתמש**\n\n"
+                "שימוש: `/reset_checkin <user_id>`\n\n"
+                "דוגמה: `/reset_checkin 123456789`",
+                parse_mode="Markdown")
+            return
+        
+        try:
+            target_user_id = int(args[1])
+        except ValueError:
+            await safe_reply(bot, chat_id, "❌ מזהה משתמש לא חוקי.")
+            return
+        
+        # אפס צ'ק-אין
+        success, msg = reset_user_checkin(target_user_id)
+        
+        if success:
+            target_user = get_user(target_user_id)
+            user_name = target_user.first_name if target_user else f"משתמש {target_user_id}"
+            
+            response = (
+                f"✅ **צ'ק-אין אופס בהצלחה!**\n\n"
+                f"👤 **משתמש:** {user_name}\n"
+                f"🆔 **מזהה:** {target_user_id}\n"
+                f"🔄 **ניתן כעת לבצע צ'ק-אין יומי חדש**"
+            )
+            await safe_reply(bot, chat_id, response, parse_mode="Markdown")
+        else:
+            await safe_reply(bot, chat_id,
+                "❌ לא ניתן לאפס צ'ק-אין למשתמש זה.\n"
+                "ייתכן שהמשתמש לא קיים.")
+        
     except Exception as e:
         await handle_command_error(bot, message.chat.id, "/reset_checkin", e)
 
@@ -1021,5 +936,5 @@ __all__ = [
     'start', 'checkin', 'balance', 'referral', 'my_referrals',
     'leaderboard', 'level', 'profile', 'tasks', 'contact',
     'help_command', 'website', 'admin_panel', 'add_tokens',
-    'reset_checkin', 'handle_callback_query'
+    'reset_checkin'
 ]
