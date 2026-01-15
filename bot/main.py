@@ -13,7 +13,6 @@ from datetime import datetime
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for
 import telebot
 from telebot.async_telebot import AsyncTeleBot
-from telebot import asyncio_helper
 
 # הוסף את התיקיות הנדרשות ל-PATH
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -60,7 +59,7 @@ try:
         get_top_users, get_system_stats, get_activity_count,
         get_total_referrals, get_referred_users, get_all_users,
         get_user_attendance_history, get_checkin_data,
-        add_tokens_to_user, reset_user_checkin
+        add_tokens_to_user, reset_user_checkin, get_daily_stats
     )
     logger.info("✅ מודולי מסד נתונים נטענו")
 except ImportError as e:
@@ -181,44 +180,51 @@ async def handle_command(message):
         
         # יבוא דינמי של הפקודות
         try:
-            from bot import commands_sync as commands
-        except ImportError:
-            # יצירת פקודות בסיסיות אם המודול לא קיים
-            await bot.reply_to(message, "🔧 המערכת בעיצומה של עדכון. נסה שוב בעוד מספר דקות.")
+            from bot.commands_sync import (
+                start, checkin, balance, referral, my_referrals,
+                leaderboard, level, profile, tasks, contact,
+                help_command, website, admin_panel, add_tokens,
+                reset_checkin
+            )
+        except ImportError as e:
+            logger.error(f"❌ שגיאה ביבוא פקודות: {e}")
+            if bot:
+                await bot.reply_to(message, "🔧 המערכת בעיצומה של עדכון. נסה שוב בעוד מספר דקות.")
             return
         
         if text.startswith('/start'):
-            await commands.start(message, bot)
+            await start(message, bot)
         elif text.startswith('/checkin'):
-            await commands.checkin(message, bot)
+            await checkin(message, bot)
         elif text.startswith('/balance'):
-            await commands.balance(message, bot)
+            await balance(message, bot)
         elif text.startswith('/referral'):
-            await commands.referral(message, bot)
+            await referral(message, bot)
         elif text.startswith('/my_referrals'):
-            await commands.my_referrals(message, bot)
+            await my_referrals(message, bot)
         elif text.startswith('/leaderboard'):
-            await commands.leaderboard(message, bot)
+            await leaderboard(message, bot)
         elif text.startswith('/level'):
-            await commands.level(message, bot)
+            await level(message, bot)
         elif text.startswith('/profile'):
-            await commands.profile(message, bot)
+            await profile(message, bot)
         elif text.startswith('/tasks'):
-            await commands.tasks(message, bot)
+            await tasks(message, bot)
         elif text.startswith('/contact'):
-            await commands.contact(message, bot)
+            await contact(message, bot)
         elif text.startswith('/help'):
-            await commands.help_command(message, bot)
+            await help_command(message, bot)
         elif text.startswith('/website'):
-            await commands.website(message, bot)
+            await website(message, bot)
         elif text.startswith('/admin'):
-            await commands.admin_panel(message, bot)
+            await admin_panel(message, bot)
         elif text.startswith('/add_tokens'):
-            await commands.add_tokens(message, bot)
+            await add_tokens(message, bot)
         elif text.startswith('/reset_checkin'):
-            await commands.reset_checkin(message, bot)
+            await reset_checkin(message, bot)
         else:
-            await bot.reply_to(message, "❔ לא מזהה את הפקודה. שלח /help לעזרה")
+            if bot:
+                await bot.reply_to(message, "❔ לא מזהה את הפקודה. שלח /help לעזרה")
             
     except Exception as e:
         logger.error(f"❌ שגיאה בטיפול בפקודה: {e}")
@@ -239,8 +245,12 @@ def index():
             except:
                 pass
         
+        # קבל נתונים נוספים
+        today_stats = get_daily_stats()
+        
         return render_template('index.html', 
                              stats=stats,
+                             today_stats=today_stats,
                              bot_username=bot_username,
                              now=datetime.now)
     except Exception as e:
@@ -343,9 +353,17 @@ def teacher_dashboard():
         stats = get_system_stats()
         top_users = get_top_users(10, 'tokens')
         
+        # פונקציית עזר לפורמט מספרים
+        def intcomma(value):
+            try:
+                return f"{int(value):,}"
+            except:
+                return str(value)
+        
         return render_template('teacher/teacher_dashboard.html',
                              stats=stats,
-                             top_users=top_users)
+                             top_users=top_users,
+                             intcomma=intcomma)
     except Exception as e:
         logger.error(f"❌ שגיאה בטעינת דשבורד מורה: {e}")
         return render_template('error.html', error="שגיאה בטעינת הדשבורד")
@@ -366,9 +384,17 @@ def teacher_users():
         users = get_all_users(limit=50)
         stats = get_system_stats()
         
+        # פונקציית עזר לפורמט מספרים
+        def intcomma(value):
+            try:
+                return f"{int(value):,}"
+            except:
+                return str(value)
+        
         return render_template('teacher/teacher_users.html',
                              users=users,
                              stats=stats,
+                             intcomma=intcomma,
                              now=datetime.now)
     except Exception as e:
         logger.error(f"❌ שגיאה בטעינת משתמשים: {e}")
