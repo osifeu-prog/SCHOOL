@@ -260,6 +260,86 @@
             border-top: 1px solid #e2e8f0;
             margin-top: 60px;
         }
+        
+        .today-stats {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            margin: 30px 0;
+        }
+        
+        .today-stats h3 {
+            color: #2d3748;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .today-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+        
+        .today-item {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.05);
+        }
+        
+        .today-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4c51bf;
+            margin: 5px 0;
+        }
+        
+        .today-label {
+            color: #718096;
+            font-size: 0.9rem;
+        }
+        
+        .level-distribution {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin: 30px 0;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+        }
+        
+        .level-bars {
+            display: flex;
+            height: 200px;
+            align-items: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .level-bar {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .bar {
+            width: 100%;
+            background: linear-gradient(to top, #667eea, #764ba2);
+            border-radius: 5px 5px 0 0;
+            transition: height 0.5s ease;
+        }
+        
+        .level-number {
+            margin-top: 10px;
+            font-weight: bold;
+            color: #2d3748;
+        }
+        
+        .level-count {
+            font-size: 0.9rem;
+            color: #718096;
+        }
     </style>
 </head>
 <body>
@@ -310,6 +390,31 @@
             </div>
         </div>
         
+        <!-- סטטיסטיקות היום -->
+        {% if today_stats %}
+        <div class="today-stats">
+            <h3>📅 פעילות היום</h3>
+            <div class="today-grid">
+                <div class="today-item">
+                    <div class="today-label">משתמשים חדשים</div>
+                    <div class="today-value">{{ today_stats.new_users_today }}</div>
+                </div>
+                <div class="today-item">
+                    <div class="today-label">צ'ק-אין היום</div>
+                    <div class="today-value">{{ today_stats.checkins_today }}</div>
+                </div>
+                <div class="today-item">
+                    <div class="today-label">משימות שהושלמו</div>
+                    <div class="today-value">{{ today_stats.tasks_completed_today }}</div>
+                </div>
+                <div class="today-item">
+                    <div class="today-label">הפניות חדשות</div>
+                    <div class="today-value">{{ today_stats.new_referrals_today }}</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
         <!-- סטטיסטיקות מהירות -->
         <div id="stats" class="stats-grid">
             <div class="stat-card">
@@ -336,6 +441,25 @@
                 <div class="stat-label">משימות שהושלמו</div>
             </div>
         </div>
+        
+        <!-- התפלגות רמות -->
+        {% if stats.level_distribution %}
+        <div class="level-distribution">
+            <h3 style="color: #2d3748; margin-bottom: 20px; text-align: center;">📊 התפלגות רמות משתמשים</h3>
+            <div class="level-bars">
+                {% for level in range(1, 11) %}
+                {% set count = stats.level_distribution.get('level_' ~ level|string, 0) %}
+                {% set max_count = stats.level_distribution.values()|max if stats.level_distribution.values() else 1 %}
+                {% set height = (count / max_count * 150) if max_count > 0 else 0 %}
+                <div class="level-bar">
+                    <div class="bar" style="height: {{ height }}px;"></div>
+                    <div class="level-number">{{ level }}</div>
+                    <div class="level-count">{{ count }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
         
         <!-- תכונות המערכת -->
         <h2 style="text-align: center; margin: 60px 0 30px; color: #2d3748;">✨ תכונות המערכת</h2>
@@ -498,6 +622,18 @@
                     card.style.opacity = '1';
                     card.style.transform = 'translateY(0)';
                 }, index * 100);
+            });
+            
+            // אנימציה לברים
+            const bars = document.querySelectorAll('.bar');
+            bars.forEach((bar, index) => {
+                const originalHeight = bar.style.height;
+                bar.style.height = '0';
+                
+                setTimeout(() => {
+                    bar.style.transition = 'height 1s ease';
+                    bar.style.height = originalHeight;
+                }, 500 + index * 100);
             });
         });
         
