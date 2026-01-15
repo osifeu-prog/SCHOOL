@@ -9,6 +9,7 @@ from datetime import datetime, date, timedelta
 import random
 import string
 from sqlalchemy import func, desc, and_, or_
+from sqlalchemy import cast, String
 
 # ========== פונקציות עזר ==========
 
@@ -777,9 +778,13 @@ def get_system_stats():
         
         # סטטיסטיקות בסיסיות
         total_users = session.query(User).count()
+        
+        # משתמשים פעילים היום (עשו צ'ק-אין)
+        today = date.today()
         active_today = session.query(Attendance).filter(
-            Attendance.date == date.today()
+            Attendance.date == today
         ).distinct(Attendance.telegram_id).count()
+        
         total_tokens = session.query(func.sum(User.tokens)).scalar() or 0
         
         # סטטיסטיקות מתקדמות
@@ -790,7 +795,8 @@ def get_system_stats():
         
         # חישוב ממוצעים
         avg_tokens = total_tokens / total_users if total_users > 0 else 0
-        avg_level = session.query(func.avg(User.level)).scalar() or 0
+        avg_level_result = session.query(func.avg(User.level)).scalar()
+        avg_level = round(avg_level_result, 2) if avg_level_result else 0
         
         # התפלגות רמות
         level_distribution = {}
@@ -815,21 +821,45 @@ def get_system_stats():
                     'count': count
                 })
         
+        # סטטיסטיקות נוספות
+        total_checkins = session.query(Attendance).count()
+        avg_daily_active = session.query(
+            func.date(Attendance.date),
+            func.count(func.distinct(Attendance.telegram_id))
+        ).group_by(func.date(Attendance.date)).all()
+        
+        avg_daily = sum(count for _, count in avg_daily_active) / len(avg_daily_active) if avg_daily_active else 0
+        
         return {
             'total_users': total_users,
             'active_today': active_today,
             'total_tokens': total_tokens,
             'total_referrals': total_referrals,
             'total_tasks_completed': total_tasks_completed,
+            'total_checkins': total_checkins,
             'avg_tokens': round(avg_tokens, 2),
-            'avg_level': round(avg_level, 2),
+            'avg_level': avg_level,
+            'avg_daily_active': round(avg_daily, 2),
             'level_distribution': level_distribution,
             'popular_tasks': popular_tasks_data,
             'timestamp': datetime.now().isoformat()
         }
     except Exception as e:
         print(f"❌ שגיאה בקבלת סטטיסטיקות: {e}")
-        return {'total_users': 0, 'active_today': 0, 'total_tokens': 0}
+        return {
+            'total_users': 0,
+            'active_today': 0,
+            'total_tokens': 0,
+            'total_referrals': 0,
+            'total_tasks_completed': 0,
+            'total_checkins': 0,
+            'avg_tokens': 0,
+            'avg_level': 0,
+            'avg_daily_active': 0,
+            'level_distribution': {},
+            'popular_tasks': [],
+            'timestamp': datetime.now().isoformat()
+        }
     finally:
         session.close()
 
@@ -857,8 +887,9 @@ def get_activity_count():
     """קבלת מספר הפעילים היום"""
     session = Session()
     try:
+        today = date.today()
         count = session.query(Attendance).filter(
-            Attendance.date == date.today()
+            Attendance.date == today
         ).distinct(Attendance.telegram_id).count()
         return count
     except Exception as e:
@@ -1075,7 +1106,7 @@ def search_users(query, limit=20):
                 User.first_name.ilike(f"%{query}%"),
                 User.last_name.ilike(f"%{query}%"),
                 User.username.ilike(f"%{query}%"),
-                User.telegram_id.cast(String).ilike(f"%{query}%")
+                cast(User.telegram_id, String).ilike(f"%{query}%")
             )
         ).limit(limit).all()
         
@@ -1083,6 +1114,106 @@ def search_users(query, limit=20):
     except Exception as e:
         print(f"❌ שגיאה בחיפוש משתמשים: {e}")
         return []
+    finally:
+        session.close()
+
+def get_today_stats():
+    """סטטיסטיקות להיום"""
+    session = Session()
+    try:
+        today = date.today()
+        
+        # משתמשים חדשים היום
+        new_users_today = session.query(User).filter(
+            func.date(User.created_at) == today
+        ).count()
+        
+        # צ'ק-אין היום
+        checkins_today = session.query(Attendance).filter(
+            Attendance.date == today
+        ).count()
+        
+        # משימות שהושלמו היום
+        tasks_completed_today = session.query(TaskCompletion).filter(
+            func.date(TaskCompletion.completed_at) == today,
+            TaskCompletion.status == TaskStatus.COMPLETED
+        ).count()
+        
+        # הפניות חדשות היום
+        new_referrals_today = session.query(Referral).filter(
+            func.date(Referral.created_at) == today
+        ).count()
+        
+        return {
+            'new_users_today': new_users_today,
+            'checkins_today': checkins_today,
+            'tasks_completed_today': tasks_completed_today,
+            'new_referrals_today': new_referrals_today
+        }
+    except Exception as e:
+        print(f"❌ שגיאה בקבלת סטטיסטיקות היום: {e}")
+        return {
+            'new_users_today': 0,
+            'checkins_today': 0,
+            'tasks_completed_today': 0,
+            'new_referrals_today': 0
+        }
+    finally:
+        session.close()
+
+def get_streak_stats():
+    """סטטיסטיקות רצפים"""
+    session = Session()
+    try:
+        # רצף ממוצע
+        all_users = session.query(User).all()
+        streaks = []
+        for user in all_users:
+            streak = calculate_user_streak(user.telegram_id)
+            streaks.append(streak)
+        
+        avg_streak = sum(streaks) / len(streaks) if streaks else 0
+        
+        # רצף מירבי
+        max_streak = max(streaks) if streaks else 0
+        
+        # משתמשים עם רצף 7+ ימים
+        users_with_7plus_streak = len([s for s in streaks if s >= 7])
+        
+        return {
+            'avg_streak': round(avg_streak, 1),
+            'max_streak': max_streak,
+            'users_with_7plus_streak': users_with_7plus_streak
+        }
+    except Exception as e:
+        print(f"❌ שגיאה בקבלת סטטיסטיקות רצפים: {e}")
+        return {
+            'avg_streak': 0,
+            'max_streak': 0,
+            'users_with_7plus_streak': 0
+        }
+    finally:
+        session.close()
+
+def get_activity_stats():
+    """סטטיסטיקות פעילות"""
+    session = Session()
+    try:
+        # שעות פעילות (הדמיית נתונים)
+        return {
+            'peak_hour': '09:00',
+            'morning_activity': 35,
+            'afternoon_activity': 45,
+            'evening_activity': 20
+        }
+    except Exception as e:
+        print(f"❌ שגיאה בקבלת סטטיסטיקות פעילות: {e}")
+        return {
+            'peak_hour': '09:00',
+            'morning_activity': 35,
+            'afternoon_activity': 45,
+            'evening_activity': 20
+        }
     finally:
         session.close()
 
@@ -1100,5 +1231,6 @@ __all__ = [
     'get_user_activity_report',
     'add_tokens_to_user', 'reset_user_checkin', 'broadcast_message_to_all',
     'create_new_task', 'get_user_leaderboard_position',
-    'get_api_stats', 'search_users'
+    'get_api_stats', 'search_users',
+    'get_today_stats', 'get_streak_stats', 'get_activity_stats'
 ]
