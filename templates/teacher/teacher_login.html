@@ -4,44 +4,40 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>כניסת מורה - Crypto-Class</title>
+    <link rel="stylesheet" href="/static/css/style.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
+            margin: 0;
+            padding: 20px;
         }
         
         .login-container {
             width: 100%;
             max-width: 400px;
-            padding: 20px;
         }
         
         .login-box {
             background: white;
             padding: 40px;
-            border-radius: 15px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             text-align: center;
         }
         
         .logo {
-            font-size: 2.5rem;
+            font-size: 3rem;
             margin-bottom: 20px;
             color: #4c51bf;
         }
         
         h1 {
-            color: #333;
+            color: #2d3748;
             margin-bottom: 10px;
             font-size: 1.8rem;
         }
@@ -49,83 +45,115 @@
         .subtitle {
             color: #718096;
             margin-bottom: 30px;
-            font-size: 0.9rem;
+            font-size: 0.95rem;
         }
         
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 25px;
             text-align: right;
         }
         
         label {
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
             color: #4a5568;
             font-weight: 500;
+            font-size: 0.9rem;
         }
         
         input[type="password"] {
             width: 100%;
-            padding: 12px 15px;
+            padding: 12px 16px;
             border: 2px solid #e2e8f0;
-            border-radius: 8px;
+            border-radius: 10px;
             font-size: 16px;
-            transition: border-color 0.3s;
+            transition: all 0.3s;
+            font-family: monospace;
         }
         
         input[type="password"]:focus {
             outline: none;
             border-color: #4c51bf;
+            box-shadow: 0 0 0 3px rgba(76, 81, 191, 0.1);
         }
         
-        button {
-            background: #4c51bf;
+        .login-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
             padding: 14px 30px;
-            border-radius: 8px;
+            border-radius: 10px;
             cursor: pointer;
             font-size: 16px;
-            font-weight: bold;
+            font-weight: 600;
             width: 100%;
-            transition: background 0.3s, transform 0.2s;
+            transition: transform 0.3s, box-shadow 0.3s;
+            margin-top: 10px;
         }
         
-        button:hover {
-            background: #434190;
+        .login-btn:hover {
             transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
         }
         
-        .error {
+        .login-btn:active {
+            transform: translateY(0);
+        }
+        
+        .error-message {
             color: #e53e3e;
             margin-top: 15px;
-            padding: 10px;
+            padding: 12px;
             background: #fed7d7;
-            border-radius: 6px;
+            border-radius: 8px;
             font-size: 0.9rem;
-        }
-        
-        .back-link {
-            display: inline-block;
-            margin-top: 20px;
-            color: #4c51bf;
-            text-decoration: none;
-            font-size: 0.9rem;
-        }
-        
-        .back-link:hover {
-            text-decoration: underline;
+            text-align: center;
+            border: 1px solid #fc8181;
         }
         
         .info-box {
             margin-top: 25px;
             padding: 15px;
             background: #f7fafc;
-            border-radius: 8px;
-            border-left: 4px solid #4c51bf;
+            border-radius: 10px;
+            border-right: 4px solid #4c51bf;
             text-align: right;
             font-size: 0.85rem;
             color: #4a5568;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-top: 25px;
+            color: #4c51bf;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .password-hint {
+            font-size: 0.8rem;
+            color: #a0aec0;
+            margin-top: 5px;
+            text-align: right;
+        }
+        
+        @media (max-width: 480px) {
+            .login-box {
+                padding: 30px 20px;
+            }
+            
+            h1 {
+                font-size: 1.5rem;
+            }
+            
+            .logo {
+                font-size: 2.5rem;
+            }
         }
     </style>
 </head>
@@ -134,30 +162,57 @@
         <div class="login-box">
             <div class="logo">👨‍🏫</div>
             <h1>כניסת מורה</h1>
-            <p class="subtitle">Crypto-Class - מערכת ניהול כיתה</p>
+            <p class="subtitle">Crypto-Class - מערכת ניהול כיתה דיגיטלית</p>
             
             <form method="POST">
                 <div class="form-group">
                     <label for="password">סיסמת מורה</label>
-                    <input type="password" id="password" name="password" placeholder="הזן סיסמה" required>
+                    <input type="password" id="password" name="password" 
+                           placeholder="הזן את סיסמת המורה" required autocomplete="current-password">
+                    <div class="password-hint">ברירת מחדל: admin123</div>
                 </div>
                 
-                <button type="submit">התחברות</button>
+                <button type="submit" class="login-btn">התחבר למערכת</button>
             </form>
             
             {% if error %}
-            <div class="error">
+            <div class="error-message">
                 {{ error }}
             </div>
             {% endif %}
             
             <div class="info-box">
-                <strong>הערה:</strong> הסיסמה ניתנת על ידי מנהל המערכת.
-                אם שכחת את הסיסמה, פנה למנהל המערכת.
+                <strong>⚠️ חשוב לדעת:</strong>
+                <ul style="margin-top: 10px; padding-right: 15px;">
+                    <li>סיסמת המורה ניתנת על ידי מנהל המערכת בלבד</li>
+                    <li>הגישה לדשבורד מאפשרת צפייה בכל הנתונים</li>
+                    <li>יש לשמור על סיסמה חזקה ולשנותה מעת לעת</li>
+                    <li>במידת הצורך, פנה למנהל המערכת</li>
+                </ul>
             </div>
             
-            <a href="/" class="back-link">← חזרה לדף הבית</a>
+            <a href="/" class="back-link">← חזרה לאתר הראשי</a>
         </div>
     </div>
+    
+    <script>
+        // פוקוס אוטומטי על שדה הסיסמה
+        document.addEventListener('DOMContentLoaded', function() {
+            const passwordField = document.getElementById('password');
+            if (passwordField) {
+                passwordField.focus();
+            }
+        });
+        
+        // הצגה/הסתרה של סיסמה (אפשר להוסיף כפתור eye)
+        function togglePassword() {
+            const passwordField = document.getElementById('password');
+            if (passwordField.type === 'password') {
+                passwordField.type = 'text';
+            } else {
+                passwordField.type = 'password';
+            }
+        }
+    </script>
 </body>
 </html>
