@@ -1,1 +1,117 @@
-הה
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>שגיאה - Crypto-Class</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .error-container {
+            max-width: 600px;
+            margin: 100px auto;
+            padding: 40px;
+            text-align: center;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        
+        .error-icon {
+            font-size: 5rem;
+            margin-bottom: 30px;
+            display: block;
+        }
+        
+        .error-code {
+            font-size: 4rem;
+            font-weight: bold;
+            color: #4c51bf;
+            margin: 20px 0;
+        }
+        
+        .error-message {
+            color: #2d3748;
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+        }
+        
+        .error-details {
+            color: #718096;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+        
+        .back-home {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 30px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 20px;
+            transition: transform 0.3s;
+        }
+        
+        .back-home:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+        
+        .tech-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 30px;
+            text-align: right;
+            font-size: 0.9rem;
+            color: #718096;
+        }
+        
+        @media (max-width: 768px) {
+            .error-container {
+                margin: 50px 20px;
+                padding: 30px 20px;
+            }
+            
+            .error-icon {
+                font-size: 4rem;
+            }
+            
+            .error-code {
+                font-size: 3rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-icon">⚠️</div>
+        
+        {% if error_code %}
+        <div class="error-code">{{ error_code }}</div>
+        {% endif %}
+        
+        {% if error %}
+        <div class="error-message">{{ error }}</div>
+        {% else %}
+        <div class="error-message">אירעה שגיאה לא צפויה</div>
+        {% endif %}
+        
+        {% if message %}
+        <div class="error-details">{{ message }}</div>
+        {% else %}
+        <div class="error-details">אנא נסה שוב מאוחר יותר או פנה לתמיכה טכנית.</div>
+        {% endif %}
+        
+        <a href="/" class="back-home">🏠 חזרה לדף הבית</a>
+        
+        {% if error_code == 500 %}
+        <div class="tech-info">
+            <strong>מידע טכני:</strong><br>
+            נא ליצור קשר עם מנהל המערכת לדיווח על השגיאה.
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
