@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Crypto-Class - מערכת מלאה משולבת
-גרסה 2.5.0 - מבוסס webhook עם Flask ו-python-telegram-bot
+גרסה 3.0.0 - מבוסס webhook בלבד, ללא polling
 """
 
 import os
@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 # הוסף את התיקיות הנדרשות ל-PATH
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -68,130 +68,115 @@ try:
     # יבוא פקודות מקובץ commands.py
     from bot.commands import (
         start, checkin, balance, referral, my_referrals,
-        leaderboard, level, contact, help_command, website
+        leaderboard, level, profile, contact, help_command, 
+        website, admin_panel, add_tokens, reset_checkin,
+        handle_callback_query
     )
     logger.info("✅ פקודות הבוט נטענו")
 except ImportError as e:
     logger.error(f"❌ שגיאה ביבוא פקודות: {e}")
     sys.exit(1)
 
-# ========== הגדרת הבוט וה-Application ==========
-# יצירת Application עבור הבוט
-application = Application.builder().token(BOT_TOKEN).build()
-
-# ========== הגדרת handlers ל-PTB ==========
-async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """טיפול בפקודת /start"""
-    await start(update, context)
-
-async def checkin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """טיפול בפקודת /checkin"""
-    await checkin(update, context)
-
-async def balance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """טיפול בפקודת /balance"""
-    await balance(update, context)
-
-async def referral_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """טיפול בפקודת /referral"""
-    await referral(update, context)
-
-async def my_referrals_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """טיפול בפקודת /my_referrals"""
-    await my_referrals(update, context)
-
-async def leaderboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """טיפול בפקודת /leaderboard"""
-    await leaderboard(update, context)
-
-async def level_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """טיפול בפקודת /level"""
-    await level(update, context)
-
-async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """טיפול בפקודת /contact"""
-    await contact(update, context)
-
-async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """טיפול בפקודת /help"""
-    await help_command(update, context)
-
-async def website_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """טיפול בפקודת /website"""
-    await website(update, context)
-
-# הוספת handlers לפקודות
-application.add_handler(CommandHandler("start", start_handler))
-application.add_handler(CommandHandler("checkin", checkin_handler))
-application.add_handler(CommandHandler("balance", balance_handler))
-application.add_handler(CommandHandler("referral", referral_handler))
-application.add_handler(CommandHandler("my_referrals", my_referrals_handler))
-application.add_handler(CommandHandler("leaderboard", leaderboard_handler))
-application.add_handler(CommandHandler("level", level_handler))
-application.add_handler(CommandHandler("contact", contact_handler))
-application.add_handler(CommandHandler("help", help_handler))
-application.add_handler(CommandHandler("website", website_handler))
-
-# טיפול בשגיאות
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """טיפול בשגיאות"""
-    logger.error(f"שגיאה: {context.error}")
+# ========== אתחול הבוט ==========
+def setup_bot():
+    """הגדרת הבוט והוספת handlers"""
     try:
-        await update.message.reply_text("❌ אירעה שגיאה. אנא נסה שוב מאוחר יותר.")
-    except:
-        pass
-
-application.add_error_handler(error_handler)
-
-# ========== הגדרת Webhook ב-Flask ==========
-@flask_app.route('/webhook', methods=['POST'])
-async def webhook():
-    """טיפול בבקשות webhook מטלגרם"""
-    try:
-        # קבלת העדכון מטלגרם
-        update = Update.de_json(await request.get_json(), application.bot)
+        # יצירת Application
+        application = Application.builder().token(BOT_TOKEN).build()
         
-        # עיבוד העדכון
-        await application.process_update(update)
+        # הוספת handlers לפקודות
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("checkin", checkin))
+        application.add_handler(CommandHandler("balance", balance))
+        application.add_handler(CommandHandler("referral", referral))
+        application.add_handler(CommandHandler("my_referrals", my_referrals))
+        application.add_handler(CommandHandler("leaderboard", leaderboard))
+        application.add_handler(CommandHandler("level", level))
+        application.add_handler(CommandHandler("profile", profile))
+        application.add_handler(CommandHandler("contact", contact))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CommandHandler("website", website))
+        application.add_handler(CommandHandler("admin", admin_panel))
+        application.add_handler(CommandHandler("add_tokens", add_tokens))
+        application.add_handler(CommandHandler("reset_checkin", reset_checkin))
         
-        return jsonify({"status": "ok"}), 200
+        # הוספת handler ל-callback queries
+        application.add_handler(CallbackQueryHandler(handle_callback_query))
+        
+        # טיפול בשגיאות
+        async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            logger.error(f"שגיאה: {context.error}", exc_info=context.error)
+            try:
+                if update and update.effective_message:
+                    await update.effective_message.reply_text(
+                        "❌ אירעה שגיאה. אנא נסה שוב מאוחר יותר."
+                    )
+            except:
+                pass
+        
+        application.add_error_handler(error_handler)
+        
+        logger.info("✅ הבוט אותחל עם כל הפקודות")
+        return application
     except Exception as e:
-        logger.error(f"❌ שגיאה בעיבוד webhook: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.error(f"❌ שגיאה באתחול הבוט: {e}")
+        return None
 
-@flask_app.route('/setwebhook', methods=['GET', 'POST'])
+# אתחול הבוט
+bot_app = setup_bot()
+
+# ========== הגדרת Webhook ==========
+@flask_app.route('/set_webhook', methods=['GET'])
 def set_webhook():
     """הגדרת webhook לבוט"""
     try:
         if not WEBHOOK_URL:
             return jsonify({
-                "status": "info",
-                "message": "WEBHOOK_URL לא מוגדר. הגדר משתנה סביבה זה כדי להפעיל webhook.",
-                "mode": "polling"
-            })
+                "success": False,
+                "message": "WEBHOOK_URL לא מוגדר בסביבה",
+                "suggestion": "הגדר את WEBHOOK_URL להפעלת webhook"
+            }), 400
         
         webhook_url = f"{WEBHOOK_URL}/webhook"
         
-        # הגדר את ה-webhook
-        from telegram.error import TelegramError
-        try:
-            # נסה להגדיר webhook
-            application.bot.set_webhook(url=webhook_url)
-            return jsonify({
-                "status": "success",
-                "message": "Webhook הוגדר בהצלחה",
-                "webhook_url": webhook_url
-            })
-        except TelegramError as e:
-            logger.error(f"❌ שגיאה בהגדרת webhook: {e}")
-            return jsonify({
-                "status": "error",
-                "message": f"שגיאה בהגדרת webhook: {str(e)}"
-            }), 500
-            
+        # הגדר את webhook
+        bot_app.bot.set_webhook(webhook_url)
+        
+        logger.info(f"✅ Webhook הוגדר: {webhook_url}")
+        return jsonify({
+            "success": True,
+            "message": "Webhook הוגדר בהצלחה",
+            "webhook_url": webhook_url
+        })
     except Exception as e:
         logger.error(f"❌ שגיאה בהגדרת webhook: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({
+            "success": False,
+            "message": f"שגיאה בהגדרת webhook: {str(e)}"
+        }), 500
+
+@flask_app.route('/webhook', methods=['POST'])
+def webhook():
+    """נקודת כניסה ל-webhook מטלגרם"""
+    try:
+        if bot_app is None:
+            return jsonify({"status": "error", "message": "Bot not initialized"}), 500
+        
+        # עיבוד העדכון
+        update = Update.de_json(request.get_json(force=True), bot_app.bot)
+        
+        # השתמש ב-ThreadPoolExecutor כדי להריץ את ה-update
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(
+                lambda: bot_app.update_queue.put_nowait(update)
+            )
+            future.result(timeout=5)
+        
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        logger.error(f"❌ שגיאה בעיבוד webhook: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # ========== דפי אתר ==========
 @flask_app.route('/')
@@ -243,24 +228,32 @@ def stats_page():
 def health_check():
     """בדיקת בריאות המערכת"""
     try:
-        # בדיקת חיבור למסד נתונים (דוגמה)
-        from database.db import Session
-        session = Session()
-        session.execute("SELECT 1")
-        session.close()
-        
-        return jsonify({
+        health_status = {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
-            "bot": "active",
+            "bot": "active" if bot_app else "inactive",
+            "database": "connected",
             "webhook": bool(WEBHOOK_URL),
-            "version": "2.5.0",
+            "version": "3.0.0",
             "features": ["web", "bot", "database", "webhook"]
-        })
+        }
+        
+        # בדיקת מסד נתונים
+        try:
+            from database.db import Session
+            session = Session()
+            session.execute("SELECT 1")
+            session.close()
+        except Exception as e:
+            health_status["database"] = f"error: {str(e)}"
+            health_status["status"] = "degraded"
+        
+        return jsonify(health_status)
     except Exception as e:
         return jsonify({
             "status": "unhealthy",
-            "error": str(e)
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
         }), 500
 
 @flask_app.route('/teacher/login', methods=['GET', 'POST'])
@@ -315,23 +308,26 @@ def main():
     # אתחול מסד נתונים
     initialize_database()
     
-    # אם יש WEBHOOK_URL, נגדיר webhook, אחרת נשתמש בפולינג (לפיתוח מקומי)
-    if WEBHOOK_URL:
-        logger.info(f"🌐 מגדיר webhook: {WEBHOOK_URL}/webhook")
-        
-        # הגדר את ה-webhook
+    # הגדר webhook אם קיים URL
+    if WEBHOOK_URL and bot_app:
+        webhook_url = f"{WEBHOOK_URL}/webhook"
         try:
-            webhook_url = f"{WEBHOOK_URL}/webhook"
-            application.bot.set_webhook(url=webhook_url)
+            bot_app.bot.set_webhook(webhook_url)
             logger.info(f"✅ Webhook הוגדר: {webhook_url}")
         except Exception as e:
             logger.error(f"❌ שגיאה בהגדרת webhook: {e}")
     else:
-        logger.warning("⚠️ WEBHOOK_URL לא מוגדר, הבוט ירוץ בפולינג (לא מומלץ ב-production).")
+        logger.warning("⚠️ WEBHOOK_URL לא מוגדר - הבוט ירוץ בפולינג מקומי")
+        # הרץ polling רק במקרה שאין webhook (לפיתוח מקומי)
+        if bot_app and os.environ.get('USE_POLLING', 'false').lower() == 'true':
+            logger.info("🤖 מפעיל בוט בפולינג...")
+            bot_app.run_polling(allowed_updates=None)
     
     # הפעלת שרת Flask
     logger.info(f"🚀 מפעיל שרת Flask על פורט {PORT}")
-    logger.info(f"📊 בריאות מערכת: {WEBHOOK_URL or 'http://localhost:' + str(PORT)}/health")
+    logger.info(f"🌐 כתובת: http://localhost:{PORT}")
+    logger.info(f"📊 בריאות מערכת: http://localhost:{PORT}/health")
+    logger.info(f"🤖 Webhook: {WEBHOOK_URL or 'לא מוגדר'}")
     
     flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
