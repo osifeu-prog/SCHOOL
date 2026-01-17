@@ -1,6 +1,6 @@
-# bot/__init__.py
-from . import commands
-from . import main
-from . import utils
+"""
+בוט Crypto-Class - חבילת פקודות
+"""
 
-__all__ = ['commands', 'main', 'utils']
+__version__ = "3.0.0"
+__author__ = "Osif Ungar"
