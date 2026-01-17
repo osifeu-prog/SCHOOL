@@ -4,3 +4,4 @@ SQLAlchemy==2.0.45
 gunicorn==21.2.0
 python-dotenv==1.0.0
 pytz==2024.1
+httpx>=0.24.0
