@@ -1,107 +1,35 @@
 #!/usr/bin/env python3
 """
-Worker למשימות רקע ב-Crypto-Class
+Worker process לבוט - מריץ את הבוט בפולינג (לגיבוי)
 """
 
-import asyncio
+import os
+import sys
 import logging
-import time
-from datetime import datetime, timedelta
-from database.queries import (
-    get_system_stats, get_user_attendance_history,
-    calculate_user_streak, update_daily_stats
-)
+from bot.main import setup_bot
 
+# הגדרת לוגים
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-class BackgroundWorker:
-    """Worker למשימות רקע"""
+def main():
+    """הרצת worker בפולינג"""
+    logger.info("🚀 מפעיל worker בפולינג...")
     
-    def __init__(self):
-        self.running = True
-        self.tasks = []
-        
-    async def start(self):
-        """התחלת Worker"""
-        logger.info("🚀 מפעיל Worker למשימות רקע")
-        
-        # הוסף משימות רקע
-        self.tasks = [
-            asyncio.create_task(self.daily_stats_update()),
-            asyncio.create_task(self.streak_calculation()),
-            asyncio.create_task(self.system_monitor()),
-            asyncio.create_task(self.cleanup_old_data()),
-        ]
-        
+    # אתחול הבוט
+    bot_app = setup_bot()
+    if bot_app:
         try:
-            await asyncio.gather(*self.tasks)
-        except asyncio.CancelledError:
-            logger.info("👋 Worker נעצר")
+            bot_app.run_polling(allowed_updates=None, drop_pending_updates=True)
         except Exception as e:
-            logger.error(f"❌ שגיאה ב-Worker: {e}")
-            
-    async def daily_stats_update(self):
-        """עדכון סטטיסטיקות יומיות"""
-        while self.running:
-            try:
-                now = datetime.now()
-                if now.hour == 0 and now.minute == 0:
-                    logger.info("📊 מבצע עדכון סטטיסטיקות יומיות")
-                    # כאן תתווסף לוגיקה לעדכון סטטיסטיקות
-                    pass
-            except Exception as e:
-                logger.error(f"❌ שגיאה בעדכון סטטיסטיקות: {e}")
-            
-            await asyncio.sleep(60)  # בדוק כל דקה
-            
-    async def streak_calculation(self):
-        """חישוב רצפי משתמשים"""
-        while self.running:
-            try:
-                # רענון רצפים כל שעה
-                await asyncio.sleep(3600)
-                logger.info("🔥 מחשב רצפי משתמשים")
-                # כאן תתווסף לוגיקה לחישוב רצפים
-            except Exception as e:
-                logger.error(f"❌ שגיאה בחישוב רצפים: {e}")
-                
-    async def system_monitor(self):
-        """ניטור מערכת"""
-        while self.running:
-            try:
-                # בדיקת מערכת כל 5 דקות
-                await asyncio.sleep(300)
-                stats = get_system_stats()
-                logger.info(f"📈 סטטוס מערכת: {stats.get('total_users', 0)} משתמשים")
-            except Exception as e:
-                logger.error(f"❌ שגיאה בניטור מערכת: {e}")
-                
-    async def cleanup_old_data(self):
-        """ניקוי נתונים ישנים"""
-        while self.running:
-            try:
-                # ניקוי פעם ביום
-                await asyncio.sleep(86400)
-                logger.info("🧹 מבצע ניקוי נתונים ישנים")
-                # כאן תתווסף לוגיקה לניקוי נתונים
-            except Exception as e:
-                logger.error(f"❌ שגיאה בניקוי נתונים: {e}")
-                
-    async def stop(self):
-        """עצירת Worker"""
-        self.running = False
-        for task in self.tasks:
-            task.cancel()
-        await asyncio.gather(*self.tasks, return_exceptions=True)
+            logger.error(f"❌ שגיאה ב-worker: {e}")
+            sys.exit(1)
+    else:
+        logger.error("❌ לא ניתן לאתחל את הבוט")
+        sys.exit(1)
 
-async def main():
-    """פונקציה ראשית"""
-    worker = BackgroundWorker()
-    
-    try:
-        await worker.start()
-    except KeyboardInterrupt:
-        await worker.stop()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+if __name__ == '__main__':
+    main()
