@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
 Crypto-Class - מערכת מלאה משולבת
-גרסה 2.3.0 - יציבה ומשודרגת עם כל התכונות
+גרסה 2.4.0 - מבוסס python-telegram-bot עם asyncio תקין
 """
 
 import os
 import sys
 import logging
-import threading
 import asyncio
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for
-import telebot
-from telebot.async_telebot import AsyncTeleBot
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # הוסף את התיקיות הנדרשות ל-PATH
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -33,23 +32,12 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     logger.error("❌ BOT_TOKEN לא מוגדר!")
-    # עבור בדיקות מקומיות
-    BOT_TOKEN = "dummy_token_for_testing"
-    logger.warning("⚠️ משתמש בטוקן דמי לבדיקה מקומית")
+    sys.exit(1)
 
 PORT = int(os.environ.get("PORT", 5000))
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").rstrip('/')
 TEACHER_PASSWORD = os.environ.get("TEACHER_PASSWORD", "admin123")
 SECRET_KEY = os.environ.get("SECRET_KEY", "crypto-class-secret-key-2026-change-this")
-
-# אתחול הבוט
-try:
-    bot = AsyncTeleBot(BOT_TOKEN)
-    logger.info(f"✅ בוט אותחל")
-except Exception as e:
-    logger.error(f"❌ שגיאה באתחול הבוט: {e}")
-    # יצירת בוט דמי לבדיקה
-    bot = None
 
 # ========== יבוא מודולים פנימיים ==========
 try:
@@ -58,28 +46,19 @@ try:
         get_user, register_user, checkin_user, get_balance,
         get_top_users, get_system_stats, get_activity_count,
         get_total_referrals, get_referred_users, get_all_users,
-        get_user_attendance_history, get_checkin_data,
-        add_tokens_to_user, reset_user_checkin, get_daily_stats,
-        get_today_stats, get_streak_stats, get_activity_stats,
-        get_api_stats, search_users, get_available_tasks,
-        complete_task, get_pending_tasks, approve_task, reject_task,
-        get_user_activity_report
+        get_checkin_data, get_today_stats, get_streak_stats,
+        get_activity_stats, get_api_stats
     )
     logger.info("✅ מודולי מסד נתונים נטענו")
 except ImportError as e:
     logger.error(f"❌ שגיאה בטעינת מודולי מסד נתונים: {e}")
-    # פונקציות דמה לבדיקה
-    def get_user(*args, **kwargs): return None
-    def get_system_stats(*args, **kwargs): return {'total_users': 0, 'active_today': 0, 'total_tokens': 0}
-    def get_top_users(*args, **kwargs): return []
-    Session = None
+    sys.exit(1)
 
 # ========== יצירת Flask app ==========
 flask_app = Flask(__name__)
 flask_app.secret_key = SECRET_KEY
 
 # ========== אתחול מסד נתונים ==========
-@flask_app.before_first_request
 def initialize_database():
     """אתחול מסד הנתונים בעת הפעלה"""
     try:
@@ -88,152 +67,106 @@ def initialize_database():
     except Exception as e:
         logger.error(f"❌ שגיאה באתחול מסד נתונים: {e}")
 
-# ========== הגדרת Webhook ==========
-@flask_app.route('/setwebhook', methods=['GET', 'POST'])
-def set_webhook():
-    """הגדרת webhook לבוט"""
-    try:
-        if not WEBHOOK_URL:
-            return jsonify({
-                "status": "info",
-                "message": "WEBHOOK_URL לא מוגדר. משתמש בפולינג מקומי.",
-                "mode": "polling"
-            })
-        
-        webhook_url = f"{WEBHOOK_URL}/webhook"
-        
-        try:
-            # נסה להגדיר webhook אם הבוט זמין
-            if bot:
-                import asyncio
-                asyncio.run(bot.set_webhook(url=webhook_url))
-                return jsonify({
-                    "status": "success",
-                    "message": "Webhook הוגדר בהצלחה",
-                    "webhook_url": webhook_url
-                })
-            else:
-                return jsonify({
-                    "status": "info",
-                    "message": "בוט לא זמין. הגדרת webhook נדחתה.",
-                    "suggested_url": webhook_url
-                })
-        except Exception as e:
-            logger.error(f"❌ שגיאה בהגדרת webhook: {e}")
-            return jsonify({
-                "status": "error",
-                "message": f"שגיאה בהגדרת webhook: {str(e)}",
-                "suggested_url": webhook_url
-            })
-            
-    except Exception as e:
-        logger.error(f"❌ שגיאה בהגדרת webhook: {e}")
-        return jsonify({"error": str(e)}), 500
+# ========== יבוא פקודות ==========
+try:
+    # יבוא פקודות מקובץ commands.py
+    from bot.commands import (
+        start, checkin, balance, referral, my_referrals,
+        leaderboard, level, contact, help_command, website
+    )
+    logger.info("✅ פקודות הבוט נטענו")
+except ImportError as e:
+    logger.error(f"❌ שגיאה ביבוא פקודות: {e}")
+    sys.exit(1)
 
-# ========== Webhook Endpoint ==========
-@flask_app.route('/webhook', methods=['POST'])
-def webhook():
-    """טיפול בפקודות מטלגרם"""
-    try:
-        if request.headers.get('content-type') == 'application/json':
-            json_string = request.get_data().decode('utf-8')
-            update = telebot.types.Update.de_json(json_string)
-            
-            # מעבד את העדכון במייל (א-סינכרוני)
-            threading.Thread(target=process_update_sync, args=(update,)).start()
-            
-            return 'OK'
-        else:
-            return 'Invalid content type', 400
-    except Exception as e:
-        logger.error(f"❌ שגיאה בעיבוד webhook: {e}")
-        return jsonify({"error": str(e)}), 500
+# ========== הגדרת handlers ל-PTB ==========
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """טיפול בפקודת /start"""
+    await start(update, context)
 
-def process_update_sync(update):
-    """עיבוד עדכון בצורה סינכרונית"""
-    try:
-        if bot:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(process_update(update))
-            loop.close()
-    except Exception as e:
-        logger.error(f"❌ שגיאה בעיבוד עדכון: {e}")
+async def checkin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """טיפול בפקודת /checkin"""
+    await checkin(update, context)
 
-async def process_update(update):
-    """עיבוד עדכון מבוט טלגרם"""
-    try:
-        if update.message:
-            message = update.message
-            user = message.from_user
-            
-            logger.info(f"📩 הודעה מ-{user.id} ({user.first_name}): {message.text}")
-            
-            # טיפול בפקודות
-            if message.text:
-                await handle_command(message)
-                
-    except Exception as e:
-        logger.error(f"❌ שגיאה בעיבוד עדכון: {e}")
+async def balance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """טיפול בפקודת /balance"""
+    await balance(update, context)
 
-async def handle_command(message):
-    """טיפול בפקודת המשתמש"""
+async def referral_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """טיפול בפקודת /referral"""
+    await referral(update, context)
+
+async def my_referrals_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """טיפול בפקודת /my_referrals"""
+    await my_referrals(update, context)
+
+async def leaderboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """טיפול בפקודת /leaderboard"""
+    await leaderboard(update, context)
+
+async def level_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """טיפול בפקודת /level"""
+    await level(update, context)
+
+async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """טיפול בפקודת /contact"""
+    await contact(update, context)
+
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """טיפול בפקודת /help"""
+    await help_command(update, context)
+
+async def website_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """טיפול בפקודת /website"""
+    await website(update, context)
+
+# ========== פונקציות תמיכה ==========
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """טיפול בשגיאות"""
+    logger.error(f"שגיאה: {context.error}")
     try:
-        text = message.text
-        user = message.from_user
+        await update.message.reply_text("❌ אירעה שגיאה. אנא נסה שוב מאוחר יותר.")
+    except:
+        pass
+
+# ========== אתחול הבוט ==========
+async def setup_bot():
+    """הגדרת הבוט והוספת handlers"""
+    try:
+        # יצירת Application
+        application = Application.builder().token(BOT_TOKEN).build()
         
-        # יבוא דינמי של הפקודות
-        try:
-            from bot.commands_sync import (
-                start, checkin, balance, referral, my_referrals,
-                leaderboard, level, profile, tasks, contact,
-                help_command, website, admin_panel, add_tokens,
-                reset_checkin
-            )
-        except ImportError as e:
-            logger.error(f"❌ שגיאה ביבוא פקודות: {e}")
-            if bot:
-                await bot.reply_to(message, "🔧 המערכת בעיצומה של עדכון. נסה שוב בעוד מספר דקות.")
-            return
+        # הוספת handlers לפקודות
+        application.add_handler(CommandHandler("start", start_handler))
+        application.add_handler(CommandHandler("checkin", checkin_handler))
+        application.add_handler(CommandHandler("balance", balance_handler))
+        application.add_handler(CommandHandler("referral", referral_handler))
+        application.add_handler(CommandHandler("my_referrals", my_referrals_handler))
+        application.add_handler(CommandHandler("leaderboard", leaderboard_handler))
+        application.add_handler(CommandHandler("level", level_handler))
+        application.add_handler(CommandHandler("contact", contact_handler))
+        application.add_handler(CommandHandler("help", help_handler))
+        application.add_handler(CommandHandler("website", website_handler))
         
-        if text.startswith('/start'):
-            await start(message, bot)
-        elif text.startswith('/checkin'):
-            await checkin(message, bot)
-        elif text.startswith('/balance'):
-            await balance(message, bot)
-        elif text.startswith('/referral'):
-            await referral(message, bot)
-        elif text.startswith('/my_referrals'):
-            await my_referrals(message, bot)
-        elif text.startswith('/leaderboard'):
-            await leaderboard(message, bot)
-        elif text.startswith('/level'):
-            await level(message, bot)
-        elif text.startswith('/profile'):
-            await profile(message, bot)
-        elif text.startswith('/tasks'):
-            await tasks(message, bot)
-        elif text.startswith('/contact'):
-            await contact(message, bot)
-        elif text.startswith('/help'):
-            await help_command(message, bot)
-        elif text.startswith('/website'):
-            await website(message, bot)
-        elif text.startswith('/admin'):
-            await admin_panel(message, bot)
-        elif text.startswith('/add_tokens'):
-            await add_tokens(message, bot)
-        elif text.startswith('/reset_checkin'):
-            await reset_checkin(message, bot)
-        else:
-            if bot:
-                await bot.reply_to(message, "❔ לא מזהה את הפקודה. שלח /help לעזרה")
-            
+        # טיפול בשגיאות
+        application.add_error_handler(error_handler)
+        
+        logger.info("✅ הבוט אותחל עם כל הפקודות")
+        return application
     except Exception as e:
-        logger.error(f"❌ שגיאה בטיפול בפקודה: {e}")
-        if bot:
-            await bot.reply_to(message, "❌ אירעה שגיאה בעיבוד הפקודה. אנא נסה שוב.")
+        logger.error(f"❌ שגיאה באתחול הבוט: {e}")
+        return None
+
+# ========== הרצת הבוט ==========
+async def run_bot():
+    """הרצת הבוט בפולינג"""
+    try:
+        application = await setup_bot()
+        if application:
+            logger.info("🤖 מפעיל בוט בפולינג...")
+            await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    except Exception as e:
+        logger.error(f"❌ שגיאה בהרצת בוט: {e}")
 
 # ========== דפי אתר ==========
 @flask_app.route('/')
@@ -241,13 +174,7 @@ def index():
     """דף הבית"""
     try:
         stats = get_system_stats()
-        bot_username = "CryptoClassBot"  # ברירת מחדל
-        if bot:
-            try:
-                bot_info = asyncio.run(bot.get_me())
-                bot_username = bot_info.username if hasattr(bot_info, 'username') else "CryptoClassBot"
-            except:
-                pass
+        bot_username = "CryptoClassBot"
         
         # קבל נתונים נוספים
         today_stats = get_today_stats()
@@ -272,7 +199,6 @@ def stats_page():
         stats = get_system_stats()
         top_users = get_top_users(10, 'tokens')
         
-        # פונקציית עזר לפורמט מספרים
         def intcomma(value):
             try:
                 return f"{int(value):,}"
@@ -292,295 +218,52 @@ def stats_page():
 def health_check():
     """בדיקת בריאות המערכת"""
     try:
-        # בדיקת חיבור למסד נתונים
-        db_status = "unknown"
-        try:
-            if Session:
-                session = Session()
-                session.execute("SELECT 1")
-                session.close()
-                db_status = "connected"
-            else:
-                db_status = "no_session"
-        except Exception as e:
-            db_status = f"error: {str(e)}"
-        
-        # בדיקת בוט
-        bot_status = "inactive"
-        if bot:
-            try:
-                # בדיקה בסיסית
-                bot_status = "active"
-            except:
-                bot_status = "error"
-        
         return jsonify({
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
-            "database": db_status,
-            "bot": bot_status,
-            "version": "2.3.0",
-            "environment": os.environ.get("RAILWAY_ENVIRONMENT", "development"),
-            "features": {
-                "webhook": bool(WEBHOOK_URL),
-                "teacher_dashboard": True,
-                "api": True,
-                "tasks": True
-            }
+            "bot": "active" if BOT_TOKEN else "inactive",
+            "version": "2.4.0",
+            "features": ["web", "bot", "database"]
         })
     except Exception as e:
         return jsonify({
             "status": "unhealthy",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
+            "error": str(e)
         }), 500
 
-@flask_app.route('/teacher/login', methods=['GET', 'POST'])
-def teacher_login():
-    """כניסת מורה"""
-    if request.method == 'POST':
-        password = request.form.get('password', '')
-        
-        if password == TEACHER_PASSWORD:
-            session['teacher_logged_in'] = True
-            session['teacher_login_time'] = datetime.now().isoformat()
-            return redirect(url_for('teacher_dashboard'))
-        else:
-            return render_template('teacher/teacher_login.html', 
-                                 error="סיסמה שגויה")
-    
-    return render_template('teacher/teacher_login.html')
-
-@flask_app.route('/teacher')
-def teacher_dashboard():
-    """דשבורד מורה"""
-    if not session.get('teacher_logged_in'):
-        return redirect(url_for('teacher_login'))
-    
-    try:
-        stats = get_system_stats()
-        top_users = get_top_users(10, 'tokens')
-        
-        # פונקציית עזר לפורמט מספרים
-        def intcomma(value):
-            try:
-                return f"{int(value):,}"
-            except:
-                return str(value)
-        
-        return render_template('teacher/teacher_dashboard.html',
-                             stats=stats,
-                             top_users=top_users,
-                             intcomma=intcomma)
-    except Exception as e:
-        logger.error(f"❌ שגיאה בטעינת דשבורד מורה: {e}")
-        return render_template('error.html', error="שגיאה בטעינת הדשבורד")
-
-@flask_app.route('/teacher/logout')
-def teacher_logout():
-    """יציאת מורה"""
-    session.pop('teacher_logged_in', None)
-    return redirect(url_for('index'))
-
-@flask_app.route('/teacher/users')
-def teacher_users():
-    """ניהול משתמשים למורים"""
-    if not session.get('teacher_logged_in'):
-        return redirect(url_for('teacher_login'))
-    
-    try:
-        users = get_all_users(limit=50)
-        stats = get_system_stats()
-        
-        # פונקציית עזר לפורמט מספרים
-        def intcomma(value):
-            try:
-                return f"{int(value):,}"
-            except:
-                return str(value)
-        
-        return render_template('teacher/teacher_users.html',
-                             users=users,
-                             stats=stats,
-                             intcomma=intcomma,
-                             now=datetime.now)
-    except Exception as e:
-        logger.error(f"❌ שגיאה בטעינת משתמשים: {e}")
-        return render_template('error.html', error="שגיאה בטעינת משתמשים")
-
-@flask_app.route('/teacher/pending_tasks')
-def teacher_pending_tasks():
-    """משימות ממתינות לאישור"""
-    if not session.get('teacher_logged_in'):
-        return redirect(url_for('teacher_login'))
-    
-    try:
-        pending_tasks = get_pending_tasks()
-        stats = get_system_stats()
-        
-        return render_template('teacher/teacher_pending_tasks.html',
-                             pending_tasks=pending_tasks,
-                             stats=stats,
-                             now=datetime.now)
-    except Exception as e:
-        logger.error(f"❌ שגיאה בטעינת משימות ממתינות: {e}")
-        return render_template('error.html', error="שגיאה בטעינת משימות")
-
-# ========== API פנימי ==========
-@flask_app.route('/api/v1/user/<int:user_id>', methods=['GET'])
-def api_get_user(user_id):
-    """API לקבלת נתוני משתמש"""
-    try:
-        user = get_user(user_id)
-        if user:
-            return jsonify({
-                "status": "success",
-                "data": {
-                    "id": user.telegram_id,
-                    "username": user.username,
-                    "first_name": user.first_name,
-                    "tokens": user.tokens,
-                    "level": user.level,
-                    "referrals": user.total_referrals,
-                    "created_at": user.created_at.isoformat() if user.created_at else None
-                }
-            })
-        else:
-            return jsonify({"status": "error", "message": "משתמש לא נמצא"}), 404
-    except Exception as e:
-        logger.error(f"❌ שגיאה ב-API user: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@flask_app.route('/api/v1/stats', methods=['GET'])
-def api_get_stats():
-    """API לקבלת סטטיסטיקות"""
-    try:
-        stats = get_api_stats()
-        return jsonify(stats)
-    except Exception as e:
-        logger.error(f"❌ שגיאה ב-API stats: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@flask_app.route('/api/v1/checkin_data/<int:days>', methods=['GET'])
-def api_get_checkin_data(days):
-    """API לקבלת נתוני צ'ק-אין"""
-    try:
-        data = get_checkin_data(days)
-        return jsonify({
-            "status": "success",
-            "data": data
-        })
-    except Exception as e:
-        logger.error(f"❌ שגיאה ב-API checkin data: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# ========== API ניהול משימות ==========
-@flask_app.route('/api/v1/tasks/approve/<int:task_id>', methods=['POST'])
-def api_approve_task(task_id):
-    """API לאישור משימה"""
-    if not session.get('teacher_logged_in'):
-        return jsonify({"status": "error", "message": "לא מורשה"}), 401
-    
-    try:
-        admin_id = 224223270  # מזהה אדמין ברירת מחדל
-        success, message = approve_task(task_id, admin_id)
-        
-        if success:
-            return jsonify({"status": "success", "message": message})
-        else:
-            return jsonify({"status": "error", "message": message}), 400
-    except Exception as e:
-        logger.error(f"❌ שגיאה ב-API approve task: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@flask_app.route('/api/v1/tasks/reject/<int:task_id>', methods=['POST'])
-def api_reject_task(task_id):
-    """API לדחיית משימה"""
-    if not session.get('teacher_logged_in'):
-        return jsonify({"status": "error", "message": "לא מורשה"}), 401
-    
-    try:
-        data = request.get_json()
-        reason = data.get('reason', '') if data else ''
-        
-        admin_id = 224223270  # מזהה אדמין ברירת מחדל
-        success, message = reject_task(task_id, admin_id, reason)
-        
-        if success:
-            return jsonify({"status": "success", "message": message})
-        else:
-            return jsonify({"status": "error", "message": message}), 400
-    except Exception as e:
-        logger.error(f"❌ שגיאה ב-API reject task: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# ========== חיפוש משתמשים ==========
-@flask_app.route('/search/users')
-def search_users_page():
-    """חיפוש משתמשים"""
-    if not session.get('teacher_logged_in'):
-        return redirect(url_for('teacher_login'))
-    
-    try:
-        query = request.args.get('q', '')
-        users = []
-        
-        if query:
-            users = search_users(query, limit=20)
-        
-        return render_template('teacher/search_users.html',
-                             users=users,
-                             query=query,
-                             now=datetime.now)
-    except Exception as e:
-        logger.error(f"❌ שגיאה בחיפוש משתמשים: {e}")
-        return render_template('error.html', error="שגיאה בחיפוש משתמשים")
-
-# ========== פונקציות מערכת ==========
-def run_bot_polling():
-    """הרצת הבוט בפולינג (לגיבוי)"""
-    try:
-        if bot:
-            logger.info("🤖 מפעיל בוט בפולינג...")
-            asyncio.run(bot.polling(non_stop=True, timeout=60))
-    except Exception as e:
-        logger.error(f"❌ שגיאה בהרצת בוט: {e}")
-
-# ========== שגיאות ==========
-@flask_app.errorhandler(404)
-def page_not_found(e):
-    """טיפול בשגיאות 404"""
-    return render_template('error.html', 
-                         error="הדף לא נמצא",
-                         message="הדף שביקשת אינו קיים במערכת."), 404
-
-@flask_app.errorhandler(500)
-def internal_server_error(e):
-    """טיפול בשגיאות 500"""
-    logger.error(f"❌ שגיאת שרת פנימית: {e}")
-    return render_template('error.html', 
-                         error="שגיאת שרת פנימית",
-                         message="אירעה שגיאה בעיבוד הבקשה. אנא נסה שוב מאוחר יותר."), 500
-
-# ========== הרצה ==========
-if __name__ == '__main__':
-    # אתחול מסד נתונים
-    try:
-        ensure_database_initialized()
-        logger.info("✅ מסד נתונים אותחל")
-    except Exception as e:
-        logger.error(f"❌ שגיאה באתחול מסד נתונים: {e}")
-    
-    # הפעלת הבוט בפולינג אם מופעל
-    if os.environ.get("USE_POLLING", "false").lower() == "true" and bot:
-        bot_thread = threading.Thread(target=run_bot_polling, daemon=True)
-        bot_thread.start()
-        logger.info("✅ בוט רץ בפולינג (thread נפרד)")
-    
-    # הפעלת שרת Flask
-    logger.info(f"🚀 מפעיל שרת Flask על פורט {PORT}")
-    logger.info(f"🌐 כתובת: http://localhost:{PORT}")
-    logger.info(f"📊 בריאות מערכת: http://localhost:{PORT}/health")
-    logger.info(f"👨‍🏫 דשבורד מורים: http://localhost:{PORT}/teacher/login")
-    
+# ========== הרצת המערכת ==========
+def run_flask():
+    """הרצת שרת Flask"""
     flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+
+async def main():
+    """הרצה ראשית של כל המערכת"""
+    # אתחול מסד נתונים
+    initialize_database()
+    
+    # הפעלת הבוט בטאסק נפרד
+    bot_task = asyncio.create_task(run_bot())
+    
+    # הפעלת Flask (בבלוקינג, אז צריך thread נפרד)
+    import threading
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    logger.info(f"🚀 המערכת הופעלה!")
+    logger.info(f"🌐 שרת Flask רץ על פורט {PORT}")
+    logger.info(f"🤖 הבוט רץ בפולינג")
+    
+    # המתן לבוט (ה-Flask רץ ב-thread נפרד)
+    try:
+        await bot_task
+    except KeyboardInterrupt:
+        logger.info("🛑 קבלת SIGINT - סיום תהליך...")
+
+if __name__ == '__main__':
+    try:
+        # הפעל את המערכת הראשית
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("👋 סיום תהליך...")
+    except Exception as e:
+        logger.error(f"❌ שגיאה קריטית: {e}")
